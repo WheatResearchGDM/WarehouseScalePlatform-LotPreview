@@ -8,7 +8,6 @@
     ["seasonYear", "Season year", []],
     ["entityName", "Entity name", ["Nombre de la entidad", "Nome da entidade"]],
     ["trialType", "Trial type", ["Tipo de ensayo", "Tipo de ensaio"]],
-    ["site", "Site", ["Sitio", "Unidade"]],
     ["location", "Location", ["Ubicación", "Ubicaci�n", "Localização", "Localiza��o"]],
     ["row", "Row", ["Fila", "Linha"]],
     ["column", "Column", ["Columna", "Coluna"]],
@@ -22,9 +21,11 @@
     ["pw", "PW", []],
   ];
   const optionalFields = [
-    ["storage", "Storage"],
-    ["weighingStatus", "Weighing status"], ["weighedAt", "Weighed at"],
-    ["sessionId", "Session ID"], ["sessionName", "Session name"], ["exportedAt", "Exported at"],
+    ["site", "Site", ["Sitio", "Unidade"]],
+    ["lotSite", "Lot site", []],
+    ["storage", "Storage", []],
+    ["weighingStatus", "Weighing status", []], ["weighedAt", "Weighed at", []],
+    ["sessionId", "Session ID", []], ["sessionName", "Session name", []], ["exportedAt", "Exported at", []],
   ];
 
   function normalizeHeader(value) {
@@ -69,7 +70,7 @@
     const headers = rows[headerRowIndex].map(normalizeHeader);
     const indexes = Object.fromEntries([
       ...fields.map((field) => [field[0], headerAliases(field).map((alias) => headers.indexOf(alias)).find((index) => index >= 0) ?? -1]),
-      ...optionalFields.map(([key, label]) => [key, headers.indexOf(normalizeHeader(label))]),
+      ...optionalFields.map((field) => [field[0], headerAliases(field).map((alias) => headers.indexOf(alias)).find((index) => index >= 0) ?? -1]),
     ]);
     const plots = [];
     const importedWeights = [];
@@ -83,7 +84,7 @@
       const plot = {
         id: cellText(row[indexes.id]), feid: cellText(row[indexes.feid]), uuid: cellText(row[indexes.uuid]).toUpperCase(),
         seasonYear: cellText(row[indexes.seasonYear]),
-        entityName: cellText(row[indexes.entityName]), trialType: cellText(row[indexes.trialType]), site: cellText(row[indexes.site]),
+        entityName: cellText(row[indexes.entityName]), trialType: cellText(row[indexes.trialType]), site: indexes.site >= 0 ? cellText(row[indexes.site]) : "",
         location: cellText(row[indexes.location]), row: cellText(row[indexes.row]), column: cellText(row[indexes.column]),
         entryCode: cellText(row[indexes.entryCode]), block: cellText(row[indexes.block]), obsName: cellText(row[indexes.obsName]),
         gid: cellText(row[indexes.gid]), gerName: cellText(row[indexes.gerName]), initialPlot: numericCell(row[indexes.initialPlot]),
@@ -102,7 +103,7 @@
         const weight = numericCell(row[indexes.pw]);
         if (Number.isFinite(weight) && weight >= 0) {
           importedWeights.push({
-            uuid: plot.uuid, weight, site: plot.site,
+            uuid: plot.uuid, weight, lotSite: indexes.lotSite >= 0 ? cellText(row[indexes.lotSite]) : "",
             storage: indexes.storage >= 0 ? cellText(row[indexes.storage]) : "",
             weighedAt: indexes.weighedAt >= 0 ? validDateText(row[indexes.weighedAt]) : "",
           });

@@ -24,14 +24,14 @@ na própria tela antes da conexão.
 - preenchimento automático do PW a partir da leitura serial;
 - importação de arquivos Excel `.xlsx` ou `.xls` pelo operador;
 - exportação das sessões e dos lotes filtrados em Excel ou CSV;
-- registro de Site e Storage por pesagem, com repetição opcional para a próxima parcela;
+- registro de Lot site e Storage por pesagem, com repetição opcional para a próxima parcela;
 - progresso em tempo real por ensaio e local, calculado pela quantidade real de parcelas importadas;
 - interface responsiva com a identidade visual da GDM;
 - persistência em Cloudflare D1 e atualização automática entre dispositivos.
 
 ## Dados
 
-O aplicativo inicia sem uma base fixa. O operador deve importar a primeira aba de um Excel que contenha os cabeçalhos: `ID`, `FEID`, `UUID`, `Season year`, `Entity name`, `Trial type`, `Site`, `Location`, `Row`, `Column`, `Entry code`, `Block`, `(OBS) Name`, `GID`, `(GER) Name`, `Initial plot`, `Final plot` e `PW`. A planilha importada fica salva no navegador do equipamento. `Initial plot` e `Final plot` permanecem no template por compatibilidade, mas não são usados nos cálculos de progresso.
+O aplicativo inicia sem uma base fixa. O operador deve importar a primeira aba de um Excel que contenha os cabeçalhos: `ID`, `FEID`, `UUID`, `Season year`, `Entity name`, `Trial type`, `Location`, `Row`, `Column`, `Entry code`, `Block`, `(OBS) Name`, `GID`, `(GER) Name`, `Initial plot`, `Final plot` e `PW`. `Site` é opcional e representa apenas o local do ensaio; `Lot site` é um metadado operacional da pesagem e nunca é sugerido a partir do Excel. A planilha importada fica salva no navegador do equipamento. `Initial plot` e `Final plot` permanecem no template por compatibilidade, mas não são usados nos cálculos de progresso.
 
 ## Desenvolvimento
 

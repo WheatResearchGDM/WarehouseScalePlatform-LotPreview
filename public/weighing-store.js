@@ -3,6 +3,7 @@
   const DB_NAME = "gdm-warehouse-scale";
   const DB_VERSION = 1;
   const ACTIVE_SESSION_KEY = "active-session-id";
+  const LOT_SITE_MIGRATION_KEY = "lot-site-v1-migrated";
   const LEGACY_PLOTS_KEY = "gdm-warehouse-scale-plots-v1";
   const LEGACY_WEIGHTS_KEY = "gdm-warehouse-scale-weights-v1";
 
@@ -79,7 +80,7 @@
       weightsStore.put({
         key: `${session.id}::${normalize(plot.uuid)}`, sessionId: session.id, uuid: plot.uuid, feid: plot.feid,
         entityName: plot.entityName, obsName: plot.obsName, weight: Number(item.weight), weighedAt: timestamp,
-        updatedAt: timestamp, source: item.source || "import", site: item.site ?? plot.site ?? "", storage: item.storage ?? "",
+        updatedAt: timestamp, source: item.source || "import", lotSite: item.lotSite ?? "", storage: item.storage ?? "",
       });
     }
     tx.objectStore("settings").put({ key: ACTIVE_SESSION_KEY, value: session.id });
@@ -99,7 +100,7 @@
     const record = {
       key: `${sessionId}::${normalize(plot.uuid)}`, sessionId, uuid: plot.uuid, feid: plot.feid,
       entityName: plot.entityName, obsName: plot.obsName, weight: numericWeight, weighedAt: iso,
-      updatedAt: iso, source, site: String(lot.site ?? plot.site ?? "").trim(), storage: String(lot.storage ?? "").trim(),
+      updatedAt: iso, source, lotSite: String(lot.lotSite ?? "").trim(), storage: String(lot.storage ?? "").trim(),
     };
     const tx = database.transaction(["weights", "sessions", "settings"], "readwrite");
     tx.objectStore("weights").put(record);
@@ -112,8 +113,8 @@
       tx.objectStore("settings").put({
         key: lotContextKey(sessionId),
         value: lot.keepForNext
-          ? { keepForNext: true, hasValue: true, site: record.site, storage: record.storage }
-          : { keepForNext: false, hasValue: false, site: "", storage: "" },
+          ? { keepForNext: true, hasValue: true, lotSite: record.lotSite, storage: record.storage }
+          : { keepForNext: false, hasValue: false, lotSite: "", storage: "" },
       });
     }
     await transactionDone(tx);
@@ -136,7 +137,7 @@
       const record = {
         key: `${sessionId}::${normalize(plot.uuid)}`, sessionId, uuid: plot.uuid, feid: plot.feid,
         entityName: plot.entityName, obsName: plot.obsName, weight: Number(entry.weight), weighedAt: iso,
-        updatedAt: iso, source: entry.source || "import", site: entry.site ?? plot.site ?? "", storage: entry.storage ?? "",
+        updatedAt: iso, source: entry.source || "import", lotSite: entry.lotSite ?? "", storage: entry.storage ?? "",
       };
       store.put(record);
       records.push(record);
@@ -179,9 +180,39 @@
     const initial = Object.values(weights || {}).map((item) => ({ ...item, weighedAt: item.weighedAt || item.updatedAt || new Date().toISOString(), source: "legacy" }));
     await createSession(database, dataset.plots, dataset.fileName || "Legacy workbook", "Imported legacy session", initial);
   }
+  async function migrateLotSite(database) {
+    if (await getSetting(database, LOT_SITE_MIGRATION_KEY)) return;
+    const tx = database.transaction(["weights", "settings"], "readwrite");
+    const weightsStore = tx.objectStore("weights");
+    const settingsStore = tx.objectStore("settings");
+    const [weights, settings] = await Promise.all([
+      requestResult(weightsStore.getAll()),
+      requestResult(settingsStore.getAll()),
+    ]);
+    for (const record of weights) {
+      delete record.site;
+      record.lotSite = "";
+      weightsStore.put(record);
+    }
+    for (const setting of settings) {
+      if (!String(setting.key || "").startsWith("lot-context::")) continue;
+      const value = setting.value && typeof setting.value === "object" ? setting.value : {};
+      const storage = String(value.storage || "");
+      setting.value = {
+        keepForNext: value.keepForNext !== false,
+        hasValue: value.keepForNext !== false && Boolean(storage),
+        lotSite: "",
+        storage,
+      };
+      settingsStore.put(setting);
+    }
+    settingsStore.put({ key: LOT_SITE_MIGRATION_KEY, value: true });
+    await transactionDone(tx);
+  }
   async function init() {
     const database = await openDatabase();
     await migrateLegacy(database);
+    await migrateLotSite(database);
     const sessions = await listSessions(database);
     let activeSessionId = await getSetting(database, ACTIVE_SESSION_KEY);
     if (!sessions.some((session) => session.id === activeSessionId)) {
@@ -196,14 +227,14 @@
     async getLotContext(database, sessionId) {
       const value = await getSetting(database, lotContextKey(sessionId));
       return value && typeof value === "object"
-        ? { keepForNext: value.keepForNext !== false, hasValue: value.hasValue === true, site: String(value.site || ""), storage: String(value.storage || "") }
-        : { keepForNext: true, hasValue: false, site: "", storage: "" };
+        ? { keepForNext: value.keepForNext !== false, hasValue: value.hasValue === true, lotSite: String(value.lotSite || ""), storage: String(value.storage || "") }
+        : { keepForNext: true, hasValue: false, lotSite: "", storage: "" };
     },
     setLotContext(database, sessionId, context) {
       return setSetting(database, lotContextKey(sessionId), {
         keepForNext: context?.keepForNext !== false,
         hasValue: context?.hasValue === true,
-        site: String(context?.site || ""), storage: String(context?.storage || ""),
+        lotSite: String(context?.lotSite || ""), storage: String(context?.storage || ""),
       });
     },
     setActiveSession(database, id) { return setSetting(database, ACTIVE_SESSION_KEY, id); },

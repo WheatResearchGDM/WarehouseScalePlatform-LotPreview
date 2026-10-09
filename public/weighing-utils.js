@@ -3,7 +3,7 @@
 
   const sourceColumns = [
     ["ID", "id"], ["FEID", "feid"], ["UUID", "uuid"], ["Season year", "seasonYear"], ["Entity name", "entityName"],
-    ["Trial type", "trialType"], ["Site", "site"], ["Location", "location"], ["Row", "row"],
+    ["Trial type", "trialType"], ["Location", "location"], ["Row", "row"],
     ["Column", "column"], ["Entry code", "entryCode"], ["Block", "block"], ["(OBS) Name", "obsName"],
     ["GID", "gid"], ["(GER) Name", "gerName"], ["Initial plot", "initialPlot"], ["Final plot", "finalPlot"],
   ];
@@ -71,9 +71,14 @@
     let keptCurrent = 0;
     const withMissingMetadata = (existing, incoming) => ({
       uuid: existing.uuid, weight: Number(existing.weight), weighedAt: existing.weighedAt || existing.updatedAt || "",
-      site: existing.site || incoming.site || "", storage: existing.storage || incoming.storage || "", source: existing.source || "import",
+      lotSite: existing.lotSite || incoming.lotSite || "", storage: existing.storage || incoming.storage || "", source: existing.source || "import",
     });
-    const hasMetadataToFill = (existing, incoming) => (!existing.site && incoming.site) || (!existing.storage && incoming.storage);
+    const withPreservedMetadata = (existing, incoming) => ({
+      ...incoming,
+      lotSite: incoming.lotSite || existing.lotSite || "",
+      storage: incoming.storage || existing.storage || "",
+    });
+    const hasMetadataToFill = (existing, incoming) => (!existing.lotSite && incoming.lotSite) || (!existing.storage && incoming.storage);
     for (const incoming of importedWeights || []) {
       const key = normalize(incoming.uuid);
       if (!plots.has(key)) { ignored += 1; continue; }
@@ -87,12 +92,12 @@
       const oldTime = Date.parse(existing.weighedAt || existing.updatedAt || "");
       const newTime = Date.parse(incoming.weighedAt || "");
       if (Number.isFinite(oldTime) && Number.isFinite(newTime) && oldTime !== newTime) {
-        if (newTime > oldTime) ready.push({ ...incoming, source: "import" });
+        if (newTime > oldTime) ready.push({ ...withPreservedMetadata(existing, incoming), source: "import" });
         else {
           if (hasMetadataToFill(existing, incoming)) ready.push(withMissingMetadata(existing, incoming));
           keptCurrent += 1;
         }
-      } else unresolved.push({ ...incoming, source: "import", weighedAt: incoming.weighedAt || new Date().toISOString() });
+      } else unresolved.push({ ...withPreservedMetadata(existing, incoming), source: "import", weighedAt: incoming.weighedAt || new Date().toISOString() });
     }
     return { ready, unresolved, ignored, unchanged, keptCurrent };
   }
@@ -104,7 +109,7 @@
       const row = {};
       for (const [label, key] of sourceColumns) row[label] = plot[key] ?? "";
       const record = records.get(normalize(plot.uuid));
-      if (record && Object.prototype.hasOwnProperty.call(record, "site")) row.Site = record.site ?? "";
+      row["Lot site"] = record?.lotSite ?? "";
       row.PW = record ? Number(record.weight) : "";
       row.Storage = record?.storage ?? "";
       row["Weighing status"] = record ? "Weighed" : "Pending";
@@ -141,7 +146,7 @@
     const name = `${slug(session.name)}_${stamp}`;
     const sheet = global.XLSX.utils.json_to_sheet(rows);
     if (format === "xlsx") {
-      const pwColumn = sourceColumns.length;
+      const pwColumn = Object.keys(rows[0]).indexOf("PW");
       const numberFormat = digits ? `0.${"0".repeat(digits)}` : "0";
       for (let rowIndex = 1; rowIndex <= rows.length; rowIndex += 1) {
         const cell = sheet[global.XLSX.utils.encode_cell({ r: rowIndex, c: pwColumn })];
@@ -184,7 +189,7 @@
       const record = records.get(normalize(plot.uuid));
       const row = { "Lot name": lotName };
       for (const [label, field] of sourceColumns) row[label] = plot[field] ?? "";
-      if (record && Object.prototype.hasOwnProperty.call(record, "site")) row.Site = record.site ?? "";
+      row["Lot site"] = record.lotSite ?? "";
       row.Weight = Number(record.weight);
       row.Storage = record.storage ?? "";
       row["Weighing status"] = "Weighed";
