@@ -80,7 +80,8 @@
       weightsStore.put({
         key: `${session.id}::${normalize(plot.uuid)}`, sessionId: session.id, uuid: plot.uuid, feid: plot.feid,
         entityName: plot.entityName, obsName: plot.obsName, weight: Number(item.weight), weighedAt: timestamp,
-        updatedAt: timestamp, source: item.source || "import", lotSite: item.lotSite ?? "", storage: item.storage ?? "",
+        updatedAt: timestamp, source: item.source || "import", lotSite: item.lotSite ?? "",
+        lotLocation: item.lotLocation ?? "", storage: item.storage ?? "",
       });
     }
     tx.objectStore("settings").put({ key: ACTIVE_SESSION_KEY, value: session.id });
@@ -100,7 +101,8 @@
     const record = {
       key: `${sessionId}::${normalize(plot.uuid)}`, sessionId, uuid: plot.uuid, feid: plot.feid,
       entityName: plot.entityName, obsName: plot.obsName, weight: numericWeight, weighedAt: iso,
-      updatedAt: iso, source, lotSite: String(lot.lotSite ?? "").trim(), storage: String(lot.storage ?? "").trim(),
+      updatedAt: iso, source, lotSite: String(lot.lotSite ?? "").trim(),
+      lotLocation: String(lot.lotLocation ?? "").trim(), storage: String(lot.storage ?? "").trim(),
     };
     const tx = database.transaction(["weights", "sessions", "settings"], "readwrite");
     tx.objectStore("weights").put(record);
@@ -113,8 +115,8 @@
       tx.objectStore("settings").put({
         key: lotContextKey(sessionId),
         value: lot.keepForNext
-          ? { keepForNext: true, hasValue: true, lotSite: record.lotSite, storage: record.storage }
-          : { keepForNext: false, hasValue: false, lotSite: "", storage: "" },
+          ? { keepForNext: true, hasValue: true, lotSite: record.lotSite, lotLocation: record.lotLocation, storage: record.storage }
+          : { keepForNext: false, hasValue: false, lotSite: "", lotLocation: "", storage: "" },
       });
     }
     await transactionDone(tx);
@@ -137,7 +139,8 @@
       const record = {
         key: `${sessionId}::${normalize(plot.uuid)}`, sessionId, uuid: plot.uuid, feid: plot.feid,
         entityName: plot.entityName, obsName: plot.obsName, weight: Number(entry.weight), weighedAt: iso,
-        updatedAt: iso, source: entry.source || "import", lotSite: entry.lotSite ?? "", storage: entry.storage ?? "",
+        updatedAt: iso, source: entry.source || "import", lotSite: entry.lotSite ?? "",
+        lotLocation: entry.lotLocation ?? "", storage: entry.storage ?? "",
       };
       store.put(record);
       records.push(record);
@@ -201,7 +204,7 @@
       setting.value = {
         keepForNext: value.keepForNext !== false,
         hasValue: value.keepForNext !== false && Boolean(storage),
-        lotSite: "",
+        lotSite: "", lotLocation: "",
         storage,
       };
       settingsStore.put(setting);
@@ -227,14 +230,14 @@
     async getLotContext(database, sessionId) {
       const value = await getSetting(database, lotContextKey(sessionId));
       return value && typeof value === "object"
-        ? { keepForNext: value.keepForNext !== false, hasValue: value.hasValue === true, lotSite: String(value.lotSite || ""), storage: String(value.storage || "") }
-        : { keepForNext: true, hasValue: false, lotSite: "", storage: "" };
+        ? { keepForNext: value.keepForNext !== false, hasValue: value.hasValue === true, lotSite: String(value.lotSite || ""), lotLocation: String(value.lotLocation || ""), storage: String(value.storage || "") }
+        : { keepForNext: true, hasValue: false, lotSite: "", lotLocation: "", storage: "" };
     },
     setLotContext(database, sessionId, context) {
       return setSetting(database, lotContextKey(sessionId), {
         keepForNext: context?.keepForNext !== false,
         hasValue: context?.hasValue === true,
-        lotSite: String(context?.lotSite || ""), storage: String(context?.storage || ""),
+        lotSite: String(context?.lotSite || ""), lotLocation: String(context?.lotLocation || ""), storage: String(context?.storage || ""),
       });
     },
     setActiveSession(database, id) { return setSetting(database, ACTIVE_SESSION_KEY, id); },

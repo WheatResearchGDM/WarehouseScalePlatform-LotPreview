@@ -9,7 +9,7 @@
     serialPort: null, serialReader: null, readLoop: null, keepReading: false, serialBuffer: "",
     serialFlushTimer: null, rawScaleWeight: null, scaleExponent: loadScaleExponent(), decimalPlaces: loadDecimalPlaces(), page: 1,
     exactPendingWeight: null, weightEdited: false,
-    lotSite: "", lotStorage: "", carriedLotSite: "", carriedStorage: "", keepLotContext: true, hasLotContext: false,
+    lotSite: "", lotLocation: "", lotStorage: "", carriedLotSite: "", carriedLotLocation: "", carriedStorage: "", keepLotContext: true, hasLotContext: false,
     scanAlert: null, scanAlertOpenedAt: 0,
     selectedTrials: new Set(), sortKey: "", sortDirection: "asc", filteredPlots: [],
   };
@@ -24,7 +24,7 @@
     weighingView: $("weighing-view"), dashboardView: $("dashboard-view"),
     importData: $("import-data"), dataFile: $("data-file"), exportExcel: $("export-excel"), exportCsv: $("export-csv"), datasetNote: $("dataset-note"),
     scanForm: $("scan-form"), scanMode: $("scan-mode"), scanValue: $("scan-value"), scanError: $("scan-error"),
-    plotCard: $("plot-card"), weightForm: $("weight-form"), weight: $("plot-weight"), lotSite: $("lot-site"), lotStorage: $("lot-storage"), keepLotContext: $("keep-lot-context"), saveButton: $("save-button"), existingBadge: $("existing-badge"),
+    plotCard: $("plot-card"), weightForm: $("weight-form"), weight: $("plot-weight"), lotSite: $("lot-site"), lotLocation: $("lot-location"), lotStorage: $("lot-storage"), keepLotContext: $("keep-lot-context"), saveButton: $("save-button"), existingBadge: $("existing-badge"),
     recentList: $("recent-list"), recentEmpty: $("recent-empty"), toast: $("toast"),
     scanAlert: $("scan-alert"), scanAlertTitle: $("scan-alert-title"), scanAlertMessage: $("scan-alert-message"), scanAlertAction: $("scan-alert-action"), scanAlertUpdate: $("scan-alert-update"), scanAlertHint: $("scan-alert-hint"),
     connectScale: $("connect-scale"), baudRate: $("baud-rate"), scaleFactor: $("scale-factor"), decimalPlaces: $("decimal-places"), scaleStatus: $("scale-status"), scaleWeight: $("scale-weight"), scaleReadingNote: $("scale-reading-note"), serialHelp: $("serial-help"),
@@ -136,9 +136,9 @@
     state.weights = state.session ? await window.GdmWeighingStore.getWeights(state.database, state.session.id) : [];
     const lotContext = state.session
       ? await window.GdmWeighingStore.getLotContext(state.database, state.session.id)
-      : { keepForNext: true, hasValue: false, lotSite: "", storage: "" };
+      : { keepForNext: true, hasValue: false, lotSite: "", lotLocation: "", storage: "" };
     state.keepLotContext = lotContext.keepForNext; state.hasLotContext = lotContext.hasValue;
-    state.carriedLotSite = lotContext.lotSite; state.carriedStorage = lotContext.storage;
+    state.carriedLotSite = lotContext.lotSite; state.carriedLotLocation = lotContext.lotLocation; state.carriedStorage = lotContext.storage;
     state.selected = null;
     state.scanAlert = null;
     refs.scanAlert.hidden = true;
@@ -152,7 +152,7 @@
     refs.plotCard.hidden = true;
     refs.scanValue.value = "";
     refs.weight.value = "";
-    refs.lotSite.value = ""; refs.lotStorage.value = ""; refs.keepLotContext.checked = state.keepLotContext;
+    refs.lotSite.value = ""; refs.lotLocation.value = ""; refs.lotStorage.value = ""; refs.keepLotContext.checked = state.keepLotContext;
     refs.weight.placeholder = formatInputNumber(0);
     await refreshSessionList();
     renderAll();
@@ -286,11 +286,12 @@
     refs.weight.value = existing ? formatInputNumber(Number(existing.weight)) : "";
     if (existing) {
       refs.lotSite.value = String(existing.lotSite || "");
+      refs.lotLocation.value = String(existing.lotLocation || "");
       refs.lotStorage.value = existing.storage || "";
     } else if (state.keepLotContext && state.hasLotContext) {
-      refs.lotSite.value = state.carriedLotSite; refs.lotStorage.value = state.carriedStorage;
+      refs.lotSite.value = state.carriedLotSite; refs.lotLocation.value = state.carriedLotLocation; refs.lotStorage.value = state.carriedStorage;
     } else {
-      refs.lotSite.value = ""; refs.lotStorage.value = "";
+      refs.lotSite.value = ""; refs.lotLocation.value = ""; refs.lotStorage.value = "";
     }
     refs.existingBadge.hidden = !existing;
     refs.existingBadge.textContent = existing ? `Already weighed: PW ${formatNumber(existing.weight)}` : "";
@@ -298,7 +299,7 @@
     setTimeout(() => refs.scanValue.focus(), 0);
   }
   function clearSelection() {
-    state.selected = null; state.exactPendingWeight = null; state.weightEdited = false; refs.plotCard.hidden = true; refs.scanValue.value = ""; refs.weight.value = ""; refs.lotSite.value = ""; refs.lotStorage.value = "";
+    state.selected = null; state.exactPendingWeight = null; state.weightEdited = false; refs.plotCard.hidden = true; refs.scanValue.value = ""; refs.weight.value = ""; refs.lotSite.value = ""; refs.lotLocation.value = ""; refs.lotStorage.value = "";
     setTimeout(() => refs.scanValue.focus(), 0);
   }
   function refreshPrecisionDisplay() {
@@ -324,13 +325,13 @@
       const plot = state.selected;
       const saved = await window.GdmWeighingStore.saveWeight(
         state.database, state.session.id, plot, weight, state.serialPort ? "serial" : "manual", undefined,
-        { lotSite: refs.lotSite.value, storage: refs.lotStorage.value, keepForNext: state.keepLotContext },
+        { lotSite: refs.lotSite.value, lotLocation: refs.lotLocation.value, storage: refs.lotStorage.value, keepForNext: state.keepLotContext },
       );
       state.weights = [saved, ...state.weights.filter((item) => normalize(item.uuid) !== normalize(saved.uuid))];
       if (state.keepLotContext) {
-        state.carriedLotSite = saved.lotSite || ""; state.carriedStorage = saved.storage || ""; state.hasLotContext = true;
+        state.carriedLotSite = saved.lotSite || ""; state.carriedLotLocation = saved.lotLocation || ""; state.carriedStorage = saved.storage || ""; state.hasLotContext = true;
       } else {
-        state.carriedLotSite = ""; state.carriedStorage = ""; state.hasLotContext = false;
+        state.carriedLotSite = ""; state.carriedLotLocation = ""; state.carriedStorage = ""; state.hasLotContext = false;
       }
       state.session.updatedAt = new Date().toISOString();
       renderAll();
@@ -489,12 +490,12 @@
   refs.weight.addEventListener("input", () => { state.weightEdited = true; state.exactPendingWeight = null; });
   refs.keepLotContext.addEventListener("change", async () => {
     state.keepLotContext = refs.keepLotContext.checked;
-    if (!state.keepLotContext) { state.hasLotContext = false; state.carriedLotSite = ""; state.carriedStorage = ""; }
+    if (!state.keepLotContext) { state.hasLotContext = false; state.carriedLotSite = ""; state.carriedLotLocation = ""; state.carriedStorage = ""; }
     if (!state.session) return;
     try {
       await window.GdmWeighingStore.setLotContext(state.database, state.session.id, {
         keepForNext: state.keepLotContext, hasValue: state.keepLotContext ? state.hasLotContext : false,
-        lotSite: state.keepLotContext ? state.carriedLotSite : "", storage: state.keepLotContext ? state.carriedStorage : "",
+        lotSite: state.keepLotContext ? state.carriedLotSite : "", lotLocation: state.keepLotContext ? state.carriedLotLocation : "", storage: state.keepLotContext ? state.carriedStorage : "",
       });
     } catch (error) { showToast(error instanceof Error ? error.message : "Could not save the lot field preference.", true); }
   });

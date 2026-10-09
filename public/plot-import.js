@@ -23,6 +23,7 @@
   const optionalFields = [
     ["site", "Site", ["Sitio", "Unidade"]],
     ["lotSite", "Lot site", []],
+    ["lotLocation", "Lot location", []],
     ["storage", "Storage", []],
     ["weighingStatus", "Weighing status", []], ["weighedAt", "Weighed at", []],
     ["sessionId", "Session ID", []], ["sessionName", "Session name", []], ["exportedAt", "Exported at", []],
@@ -104,6 +105,7 @@
         if (Number.isFinite(weight) && weight >= 0) {
           importedWeights.push({
             uuid: plot.uuid, weight, lotSite: indexes.lotSite >= 0 ? cellText(row[indexes.lotSite]) : "",
+            lotLocation: indexes.lotLocation >= 0 ? cellText(row[indexes.lotLocation]) : "",
             storage: indexes.storage >= 0 ? cellText(row[indexes.storage]) : "",
             weighedAt: indexes.weighedAt >= 0 ? validDateText(row[indexes.weighedAt]) : "",
           });

@@ -92,16 +92,18 @@ select:focus, input:focus { border-color: #7fa9d2 !important; box-shadow: 0 0 0 
 .ger-card { padding: 17px; border: 1px solid rgba(255,255,255,.22); border-radius: 6px; background: rgba(255,255,255,.08); }
 .ger-card strong { display: block; margin-top: 8px; color: #fff; font-size: 20px; }
 .ger-card > p:last-child { margin: 18px 0 0; color: #c7d7e7; font-size: 14px; }
-.plot-card__body { padding: 28px; display: grid; grid-template-columns: minmax(0,1fr) 330px; gap: 24px; }
-.details-grid { margin: 0; display: grid; grid-template-columns: repeat(5,1fr); gap: 12px; }
-.details-grid > div { padding: 14px; border: 1px solid #cfdeeb; border-radius: 6px; background: #f7fafe; }
-.details-grid dd { margin: 0; color: #173a61; font-size: 24px; font-weight: 900; }
-.details-grid .identifiers { grid-column: 1/-1; }
-.identifiers dd { display: grid; grid-template-columns: 1fr 1.5fr; gap: 8px; color: #375b7d; font-size: 13px; font-weight: 500; }
+.plot-card__body { padding: 24px; display: grid; grid-template-columns: minmax(0,1fr) 430px; gap: 20px; }
+.details-grid { align-self: start; margin: 0; display: grid; grid-template-columns: repeat(5,1fr); overflow: hidden; border: 1px solid #cfdeeb; border-radius: 6px; background: #f7fafe; }
+.details-grid > div { min-width: 0; padding: 10px 12px; border-right: 1px solid #d8e4ee; }
+.details-grid > div:nth-child(5) { border-right: 0; }
+.details-grid dd { margin: 2px 0 0; color: #173a61; font-size: 20px; line-height: 1.1; font-weight: 900; }
+.details-grid .identifiers { grid-column: 1/-1; border-top: 1px solid #d8e4ee; border-right: 0; }
+.identifiers dd { display: grid; grid-template-columns: minmax(120px,.45fr) 1fr; gap: 12px; margin-top: 5px; color: #375b7d; font-size: 12px; font-weight: 500; }
 .identifiers i { font-style: normal; overflow-wrap: anywhere; }
 .weight-form { padding: 18px; border: 1px solid #cbdcec; border-radius: 6px; background: #eaf2f9; }
 .weight-form > input { height: 64px; padding: 0 16px; font-size: 31px; font-weight: 900; }
 .lot-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.lot-fields .lot-storage-field { grid-column: 1/-1; }
 .lot-fields label { color: #526f89; font-size: 11px; font-weight: 850; text-transform: uppercase; letter-spacing: .08em; }
 .lot-fields input { width: 100%; height: 40px; margin-top: 5px; padding: 0 10px; background: #fff; font-size: 14px; font-weight: 650; text-transform: none; letter-spacing: normal; }
 .keep-lot-context { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; color: #365b80; font-size: 12px; font-weight: 800; cursor: pointer; }
@@ -206,7 +208,12 @@ tbody tr:nth-child(even) { background: #f7fafd; }
   .panel-actions { justify-content: flex-start; }
   .scale-panel__controls, .scan-form, .plot-card__titles { grid-template-columns: 1fr; }
   .details-grid { grid-template-columns: repeat(2,1fr); }
+  .details-grid > div { border-bottom: 1px solid #d8e4ee; }
+  .details-grid > div:nth-child(5) { grid-column: 1/-1; border-right: 0; }
+  .details-grid .identifiers { border-bottom: 0; }
   .identifiers dd { grid-template-columns: 1fr; }
+  .lot-fields { grid-template-columns: 1fr; }
+  .lot-fields .lot-storage-field { grid-column: auto; }
   .recent-item { grid-template-columns: 1fr auto; }
   .recent-item time { grid-column: 1/-1; min-width: 0; text-align: left; }
   .summary-grid { grid-template-columns: 1fr; }

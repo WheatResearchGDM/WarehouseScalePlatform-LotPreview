@@ -71,14 +71,17 @@
     let keptCurrent = 0;
     const withMissingMetadata = (existing, incoming) => ({
       uuid: existing.uuid, weight: Number(existing.weight), weighedAt: existing.weighedAt || existing.updatedAt || "",
-      lotSite: existing.lotSite || incoming.lotSite || "", storage: existing.storage || incoming.storage || "", source: existing.source || "import",
+      lotSite: existing.lotSite || incoming.lotSite || "", lotLocation: existing.lotLocation || incoming.lotLocation || "",
+      storage: existing.storage || incoming.storage || "", source: existing.source || "import",
     });
     const withPreservedMetadata = (existing, incoming) => ({
       ...incoming,
       lotSite: incoming.lotSite || existing.lotSite || "",
+      lotLocation: incoming.lotLocation || existing.lotLocation || "",
       storage: incoming.storage || existing.storage || "",
     });
-    const hasMetadataToFill = (existing, incoming) => (!existing.lotSite && incoming.lotSite) || (!existing.storage && incoming.storage);
+    const hasMetadataToFill = (existing, incoming) => (!existing.lotSite && incoming.lotSite)
+      || (!existing.lotLocation && incoming.lotLocation) || (!existing.storage && incoming.storage);
     for (const incoming of importedWeights || []) {
       const key = normalize(incoming.uuid);
       if (!plots.has(key)) { ignored += 1; continue; }
@@ -110,6 +113,7 @@
       for (const [label, key] of sourceColumns) row[label] = plot[key] ?? "";
       const record = records.get(normalize(plot.uuid));
       row["Lot site"] = record?.lotSite ?? "";
+      row["Lot location"] = record?.lotLocation ?? "";
       row.PW = record ? Number(record.weight) : "";
       row.Storage = record?.storage ?? "";
       row["Weighing status"] = record ? "Weighed" : "Pending";
@@ -190,6 +194,7 @@
       const row = { "Lot name": lotName };
       for (const [label, field] of sourceColumns) row[label] = plot[field] ?? "";
       row["Lot site"] = record.lotSite ?? "";
+      row["Lot location"] = record.lotLocation ?? "";
       row.Weight = Number(record.weight);
       row.Storage = record.storage ?? "";
       row["Weighing status"] = "Weighed";

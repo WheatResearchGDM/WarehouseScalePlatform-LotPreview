@@ -13,7 +13,7 @@ const plots = [
   { id: "2", feid: "20", uuid: "B", seasonYear: "2026", entityName: "Trial A", trialType: "EYT", site: "Site 1", location: "North", row: "1", column: "2", entryCode: "2", block: "1", obsName: "1002", gid: "G2", gerName: "R2", initialPlot: 1, finalPlot: 100 },
   { id: "3", feid: "30", uuid: "C", seasonYear: "2026", entityName: "Trial A", trialType: "EYT", site: "Site 2", location: "South", row: "1", column: "3", entryCode: "3", block: "1", obsName: "1003", gid: "G3", gerName: "R3", initialPlot: 1, finalPlot: 100 },
 ];
-const weights = [{ uuid: "A", weight: 0, lotSite: "Operational site", storage: "Cold room", weighedAt: "2026-10-08T12:00:00.000Z" }];
+const weights = [{ uuid: "A", weight: 0, lotSite: "Operational site", lotLocation: "Dispatch area", storage: "Cold room", weighedAt: "2026-10-08T12:00:00.000Z" }];
 
 assert.deepEqual(globalThis.GdmWeighingUtils.overallProgress(plots, weights), { total: 3, completed: 1, remaining: 2, percent: 33 });
 assert.deepEqual(globalThis.GdmWeighingUtils.groupProgress(plots, weights, "location").map(({ label, total, completed }) => ({ label, total, completed })), [
@@ -22,19 +22,21 @@ assert.deepEqual(globalThis.GdmWeighingUtils.groupProgress(plots, weights, "loca
 ]);
 const metadataMerge = globalThis.GdmWeighingUtils.prepareMerge(
   plots,
-  [{ uuid: "A", weight: 0, weighedAt: "2026-10-08T12:00:00.000Z", lotSite: "", storage: "" }],
-  [{ uuid: "A", weight: 0, weighedAt: "2026-10-08T12:00:00.000Z", lotSite: "Imported site", storage: "Imported storage" }],
+  [{ uuid: "A", weight: 0, weighedAt: "2026-10-08T12:00:00.000Z", lotSite: "", lotLocation: "", storage: "" }],
+  [{ uuid: "A", weight: 0, weighedAt: "2026-10-08T12:00:00.000Z", lotSite: "Imported site", lotLocation: "Imported destination", storage: "Imported storage" }],
 );
 assert.equal(metadataMerge.ready.length, 1);
 assert.equal(metadataMerge.ready[0].lotSite, "Imported site");
+assert.equal(metadataMerge.ready[0].lotLocation, "Imported destination");
 assert.equal(metadataMerge.ready[0].storage, "Imported storage");
 const newerWeightMerge = globalThis.GdmWeighingUtils.prepareMerge(
   plots,
-  [{ uuid: "A", weight: 1, weighedAt: "2026-10-08T12:00:00.000Z", lotSite: "Current lot site", storage: "Current storage" }],
-  [{ uuid: "A", weight: 2, weighedAt: "2026-10-08T13:00:00.000Z", lotSite: "", storage: "" }],
+  [{ uuid: "A", weight: 1, weighedAt: "2026-10-08T12:00:00.000Z", lotSite: "Current lot site", lotLocation: "Current destination", storage: "Current storage" }],
+  [{ uuid: "A", weight: 2, weighedAt: "2026-10-08T13:00:00.000Z", lotSite: "", lotLocation: "", storage: "" }],
 );
 assert.equal(newerWeightMerge.ready[0].weight, 2);
 assert.equal(newerWeightMerge.ready[0].lotSite, "Current lot site");
+assert.equal(newerWeightMerge.ready[0].lotLocation, "Current destination");
 assert.equal(newerWeightMerge.ready[0].storage, "Current storage");
 
 const capturedSheets = [];
@@ -51,6 +53,8 @@ const session = { id: "S1", name: "Session", sourceFileName: "source.xlsx", crea
 assert.equal(globalThis.GdmWeighingUtils.exportSession(session, weights, "xlsx", plots, 2), 3);
 const sessionRows = capturedSheets[0];
 assert.equal(sessionRows[0]["Lot site"], "Operational site");
+assert.equal(sessionRows[0]["Lot location"], "Dispatch area");
+assert.equal(sessionRows[0].Location, "North");
 assert.equal("Site" in sessionRows[0], false);
 assert.equal(sessionRows[1]["Lot site"], "");
 capturedSheets.length = 0;
@@ -59,6 +63,8 @@ const capturedRows = capturedSheets[0];
 assert.equal(capturedRows[0]["Lot name"], "2026 | Trial A | 1 | 1001");
 assert.equal(capturedRows[0].Weight, 0);
 assert.equal(capturedRows[0]["Lot site"], "Operational site");
+assert.equal(capturedRows[0]["Lot location"], "Dispatch area");
+assert.equal(capturedRows[0].Location, "North");
 assert.equal("Site" in capturedRows[0], false);
 assert.equal(capturedRows[0].Storage, "Cold room");
 assert.equal("PW" in capturedRows[0], false);
@@ -70,12 +76,12 @@ assert.throws(() => globalThis.GdmWeighingUtils.exportLots(session, weights, "xl
 
 await loadBrowserScript("public/plot-import.js");
 const requiredHeaders = globalThis.GdmPlotImport.requiredHeaders;
-const headers = [...requiredHeaders, "Site", "Lot site", "Storage"];
+const headers = [...requiredHeaders, "Site", "Lot site", "Lot location", "Storage"];
 const row = headers.map((header) => ({
   ID: "1", FEID: "10", UUID: "A", "Season year": "2026", "Entity name": "Trial A", "Trial type": "EYT",
   Site: "Site 1", Location: "North", Row: "1", Column: "1", "Entry code": "1", Block: "1", "(OBS) Name": "1001",
   GID: "G1", "(GER) Name": "R1", "Initial plot": 1, "Final plot": 100, PW: 0,
-  "Lot site": "Lot Site 1", Storage: "Cold room",
+  "Lot site": "Lot Site 1", "Lot location": "Dispatch area", Storage: "Cold room",
 }[header]));
 let importRows = [headers, row];
 globalThis.XLSX.read = () => ({ SheetNames: ["Data"], Sheets: { Data: {} } });
@@ -85,18 +91,20 @@ assert.equal(imported.plots[0].seasonYear, "2026");
 assert.equal(imported.plots[0].site, "Site 1");
 assert.equal(imported.importedWeights[0].weight, 0);
 assert.equal(imported.importedWeights[0].lotSite, "Lot Site 1");
+assert.equal(imported.importedWeights[0].lotLocation, "Dispatch area");
 
-const headersWithoutSite = [...requiredHeaders, "Lot site", "Storage"];
+const headersWithoutSite = [...requiredHeaders, "Lot site", "Lot location", "Storage"];
 const rowWithoutSite = headersWithoutSite.map((header) => ({
   ID: "1", FEID: "10", UUID: "A", "Season year": "2026", "Entity name": "Trial A", "Trial type": "EYT",
   Location: "North", Row: "1", Column: "1", "Entry code": "1", Block: "1", "(OBS) Name": "1001",
   GID: "G1", "(GER) Name": "R1", "Initial plot": 1, "Final plot": 100, PW: 0,
-  "Lot site": "Lot Site 2", Storage: "Dry room",
+  "Lot site": "Lot Site 2", "Lot location": "Shipping dock", Storage: "Dry room",
 }[header]));
 importRows = [headersWithoutSite, rowWithoutSite];
 const reimported = await globalThis.GdmPlotImport.parseExcelFile({ name: "export.xlsx", async arrayBuffer() { return new ArrayBuffer(0); } });
 assert.equal(reimported.plots[0].site, "");
 assert.equal(reimported.importedWeights[0].lotSite, "Lot Site 2");
+assert.equal(reimported.importedWeights[0].lotLocation, "Shipping dock");
 
 importRows = [headers.filter((header) => header !== "Season year"), row.filter((_, index) => headers[index] !== "Season year")];
 await assert.rejects(() => globalThis.GdmPlotImport.parseExcelFile({ name: "missing.xlsx", async arrayBuffer() { return new ArrayBuffer(0); } }), /Missing headers: Season year/);
