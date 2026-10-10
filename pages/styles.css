@@ -103,7 +103,7 @@ select:focus, input:focus { border-color: #7fa9d2 !important; box-shadow: 0 0 0 
 .weight-form { padding: 18px; border: 1px solid #cbdcec; border-radius: 6px; background: #eaf2f9; }
 .weight-form > input { height: 64px; padding: 0 16px; font-size: 31px; font-weight: 900; }
 .lot-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
-.lot-fields .lot-storage-field { grid-column: 1/-1; }
+.lot-fields .lot-location-field { grid-column: 1/-1; }
 .lot-fields label { color: #526f89; font-size: 11px; font-weight: 850; text-transform: uppercase; letter-spacing: .08em; }
 .lot-fields input { width: 100%; height: 40px; margin-top: 5px; padding: 0 10px; background: #fff; font-size: 14px; font-weight: 650; text-transform: none; letter-spacing: normal; }
 .keep-lot-context { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; color: #365b80; font-size: 12px; font-weight: 800; cursor: pointer; }
@@ -182,6 +182,21 @@ tbody tr:nth-child(even) { background: #f7fafd; }
 .scan-alert--unavailable .scan-alert__dialog { border-color: #b42318; }
 .scan-alert--unavailable .scan-alert__hero { background: #fff0ee; color: #962b20; }
 .scan-alert--unavailable .scan-alert__body button { background: #b42318; }
+.export-prompt { position: fixed; inset: 0; z-index: 110; display: grid; place-items: center; padding: 16px; background: rgba(16,40,64,.66); }
+.export-prompt[hidden] { display: none; }
+.export-prompt__dialog { width: min(570px,100%); overflow: hidden; border: 2px solid #315f8b; border-radius: 12px; background: #fff; box-shadow: 0 24px 70px rgba(10,31,53,.4); }
+.export-prompt__hero { padding: 22px 24px; background: #eaf3fb; color: #173f66; text-align: center; }
+.export-prompt__hero > span { display: block; font-size: 42px; font-weight: 900; line-height: 1; }
+.export-prompt__hero h2 { margin-top: 8px; font-size: 25px; font-weight: 950; }
+.export-prompt__body { padding: 24px; text-align: center; }
+.export-prompt__body > p { margin: 0; color: #284966; font-size: 16px; font-weight: 700; line-height: 1.5; }
+.export-prompt__body > small { display: block; margin-top: 8px; color: #60768d; font-size: 12px; line-height: 1.45; }
+.export-prompt__error { margin-top: 16px; padding: 12px 14px; border: 1px solid #f2c8be; border-radius: 7px; background: #fff4f1; color: #963827; text-align: left; font-size: 13px; font-weight: 800; }
+.export-prompt__actions { display: flex; justify-content: center; gap: 8px; margin-top: 22px; }
+.export-prompt__actions button { min-height: 48px; padding: 0 17px; border: 0; border-radius: 6px; background: #1f4269; color: #fff; font-size: 14px; font-weight: 900; }
+.export-prompt__actions button:disabled { opacity: .6; cursor: wait; }
+.export-prompt__actions .export-prompt__secondary { border: 1px solid #547fa6; background: #fff; color: #285882; }
+.export-prompt__actions .export-prompt__cancel { background: transparent; color: #526b82; }
 .toast { position: fixed; right: 24px; bottom: 24px; z-index: 20; max-width: min(520px,calc(100vw - 48px)); padding: 14px 18px; border-radius: 7px; background: #173f66; color: #fff; box-shadow: 0 12px 30px rgba(19,48,78,.28); font-weight: 750; }
 .toast--error { background: #a53c32; }
 @media (max-width: 980px) {
@@ -202,6 +217,8 @@ tbody tr:nth-child(even) { background: #f7fafd; }
   .session-controls select { flex: 1 1 100%; max-width: none; }
   .scan-alert__actions { flex-direction: column-reverse; }
   .scan-alert__body button { width: 100%; }
+  .export-prompt__actions { flex-direction: column; }
+  .export-prompt__actions button { width: 100%; }
   .tabs { width: 100%; }
   .tab { flex: 1; }
   .panel-heading { align-items: stretch; }
@@ -213,7 +230,7 @@ tbody tr:nth-child(even) { background: #f7fafd; }
   .details-grid .identifiers { border-bottom: 0; }
   .identifiers dd { grid-template-columns: 1fr; }
   .lot-fields { grid-template-columns: 1fr; }
-  .lot-fields .lot-storage-field { grid-column: auto; }
+  .lot-fields .lot-location-field { grid-column: auto; }
   .recent-item { grid-template-columns: 1fr auto; }
   .recent-item time { grid-column: 1/-1; min-width: 0; text-align: left; }
   .summary-grid { grid-template-columns: 1fr; }

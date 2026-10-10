@@ -115,9 +115,8 @@
     return { ready, unresolved, ignored, unchanged, keptCurrent };
   }
 
-  function exportRows(session, weights, plots = session.plots) {
+  function exportRows(session, weights, plots = session.plots, exportedAt = new Date().toISOString()) {
     const records = byUuid(weights);
-    const exportedAt = new Date().toISOString();
     return plots.map((plot) => {
       const row = {};
       for (const [label, key] of sourceColumns) row[label] = plot[key] ?? "";
@@ -152,12 +151,20 @@
     link.remove();
     setTimeout(() => URL.revokeObjectURL(href), 0);
   }
-  function exportSession(session, weights, format, plots = session.plots, places = 0) {
+
+  function workbookBlob(workbook) {
+    const content = global.XLSX.write(workbook, { bookType: "xlsx", type: "array", compression: true });
+    return new Blob([content], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  }
+
+  function prepareSessionExport(session, weights, format, plots = session.plots, places = 0, exportedOn = new Date()) {
     if (!global.XLSX) throw new Error("The spreadsheet writer is unavailable.");
-    const rows = exportRows(session, weights, plots);
+    if (!plots?.length) throw new Error("No plot records match the current filters.");
+    const exportedAt = exportedOn.toISOString();
+    const rows = exportRows(session, weights, plots, exportedAt);
     const weightColumnLabel = weightLabel(session);
     const digits = decimalPlaces(places);
-    const stamp = fileStamp();
+    const stamp = fileStamp(exportedOn);
     const name = `${slug(session.name)}_${stamp}`;
     const sheet = global.XLSX.utils.json_to_sheet(rows);
     if (format === "xlsx") {
@@ -176,17 +183,16 @@
         { Field: "Exported at", Value: rows[0]?.["Exported at"] || new Date().toISOString() },
       ]);
       global.XLSX.utils.book_append_sheet(workbook, info, "Session Info");
-      global.XLSX.writeFile(workbook, `${name}.xlsx`, { compression: true });
+      return { blob: workbookBlob(workbook), fileName: `${name}.xlsx`, count: rows.length };
     } else {
       const csvRows = rows.map((row) => ({ ...row, [weightColumnLabel]: row[weightColumnLabel] === "" ? "" : fixedDecimal(row[weightColumnLabel], digits) }));
       const csvSheet = global.XLSX.utils.json_to_sheet(csvRows);
       const csv = global.XLSX.utils.sheet_to_csv(csvSheet, { FS: ",", RS: "\r\n" });
-      downloadBlob(new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }), `${name}.csv`);
+      return { blob: new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }), fileName: `${name}.csv`, count: rows.length };
     }
-    return rows.length;
   }
 
-  function exportLots(session, weights, format, plots = session.plots, places = 0) {
+  function prepareLotsExport(session, weights, format, plots = session.plots, places = 0, exportedOn = new Date()) {
     if (!global.XLSX) throw new Error("The spreadsheet writer is unavailable.");
     const records = byUuid(weights);
     const weightColumnLabel = weightLabel(session);
@@ -195,7 +201,7 @@
     const invalid = [];
     const seen = new Map();
     const duplicates = new Set();
-    const exportedAt = new Date().toISOString();
+    const exportedAt = exportedOn.toISOString();
     const rows = candidates.map((plot) => {
       const parts = [plot.seasonYear, plot.entityName, plot.block, plot.obsName].map((value) => String(value ?? "").trim());
       if (parts.some((value) => !value)) invalid.push(plot.feid || plot.uuid || "Unknown plot");
@@ -223,7 +229,7 @@
       throw new Error(`Duplicate Lot name values found: ${names.slice(0, 5).join(", ")}${names.length > 5 ? "…" : ""}.`);
     }
     const digits = decimalPlaces(places);
-    const name = `${slug(session.name)}_lots_${fileStamp()}`;
+    const name = `${slug(session.name)}_lots_${fileStamp(exportedOn)}`;
     const sheet = global.XLSX.utils.json_to_sheet(rows);
     if (format === "xlsx") {
       const weightColumn = Object.keys(rows[0]).indexOf(weightColumnLabel);
@@ -241,15 +247,36 @@
         { Field: "Exported at", Value: exportedAt },
       ]);
       global.XLSX.utils.book_append_sheet(workbook, info, "Session Info");
-      global.XLSX.writeFile(workbook, `${name}.xlsx`, { compression: true });
+      return { blob: workbookBlob(workbook), fileName: `${name}.xlsx`, count: rows.length };
     } else {
       const csvRows = rows.map((row) => ({ ...row, [weightColumnLabel]: fixedDecimal(row[weightColumnLabel], digits) }));
       const csvSheet = global.XLSX.utils.json_to_sheet(csvRows);
       const csv = global.XLSX.utils.sheet_to_csv(csvSheet, { FS: ",", RS: "\r\n" });
-      downloadBlob(new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }), `${name}.csv`);
+      return { blob: new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }), fileName: `${name}.csv`, count: rows.length };
     }
-    return rows.length;
   }
 
-  global.GdmWeighingUtils = { normalize, decimalPlaces, fixedDecimal, byUuid, groupProgress, overallProgress, prepareMerge, exportRows, exportSession, exportLots, weightVariables, weightVariable, weightLabel };
+  function downloadPreparedExport(artifact) {
+    downloadBlob(artifact.blob, artifact.fileName);
+    return artifact.count;
+  }
+
+  function exportSession(session, weights, format, plots = session.plots, places = 0) {
+    return downloadPreparedExport(prepareSessionExport(session, weights, format, plots, places));
+  }
+
+  function exportLots(session, weights, format, plots = session.plots, places = 0) {
+    return downloadPreparedExport(prepareLotsExport(session, weights, format, plots, places));
+  }
+
+  function exportSessionAndLots(session, weights, format, plots = session.plots, places = 0) {
+    const exportedOn = new Date();
+    const sessionArtifact = prepareSessionExport(session, weights, format, plots, places, exportedOn);
+    const lotsArtifact = prepareLotsExport(session, weights, format, plots, places, exportedOn);
+    downloadPreparedExport(sessionArtifact);
+    downloadPreparedExport(lotsArtifact);
+    return { sessionCount: sessionArtifact.count, lotCount: lotsArtifact.count };
+  }
+
+  global.GdmWeighingUtils = { normalize, decimalPlaces, fixedDecimal, byUuid, groupProgress, overallProgress, prepareMerge, exportRows, exportSession, exportLots, exportSessionAndLots, weightVariables, weightVariable, weightLabel };
 })(window);

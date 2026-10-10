@@ -41,6 +41,7 @@ type ProgressItem = {
 type OverallProgress = { total: number; completed: number; remaining: number; percent: number };
 type MergePlan = { ready: ImportedWeight[]; unresolved: ImportedWeight[]; ignored: number; unchanged: number; keptCurrent: number };
 type ScanAlert = { kind: "existing" | "unavailable"; title: string; message: string; actionLabel: string };
+type ExportPrompt = { format: "xlsx" | "csv"; error: string; busy: boolean };
 type StoreApi = {
   init(): Promise<{ database: IDBDatabase; sessions: WeighingSession[]; activeSessionId: string | null }>;
   listSessions(database: IDBDatabase): Promise<WeighingSession[]>;
@@ -63,6 +64,7 @@ type UtilsApi = {
   prepareMerge(plots: Plot[], current: WeightRecord[], imported: ImportedWeight[]): MergePlan;
   exportSession(session: WeighingSession, weights: WeightRecord[], format: "xlsx" | "csv", plots?: Plot[], decimalPlaces?: number): number;
   exportLots(session: WeighingSession, weights: WeightRecord[], format: "xlsx" | "csv", plots?: Plot[], decimalPlaces?: number): number;
+  exportSessionAndLots(session: WeighingSession, weights: WeightRecord[], format: "xlsx" | "csv", plots?: Plot[], decimalPlaces?: number): { sessionCount: number; lotCount: number };
   weightLabel(sessionOrVariable: WeighingSession | WeightVariable): string;
 };
 type ImportApi = { parseExcelFile(file: File): Promise<ImportResult> };
@@ -217,6 +219,7 @@ export default function Home() {
   const [scanValue, setScanValue] = useState("");
   const [scanError, setScanError] = useState("");
   const [scanAlert, setScanAlert] = useState<ScanAlert | null>(null);
+  const [exportPrompt, setExportPrompt] = useState<ExportPrompt | null>(null);
   const [selected, setSelected] = useState<Plot | null>(null);
   const [weightValue, setWeightValue] = useState("");
   const [lotSite, setLotSite] = useState("");
@@ -250,6 +253,12 @@ export default function Home() {
   const scanAlertRef = useRef<ScanAlert | null>(null);
   const scanAlertOpenedAtRef = useRef(0);
   const weightRef = useRef<HTMLInputElement>(null);
+  const exportDialogRef = useRef<HTMLElement>(null);
+  const exportPrimaryButtonRef = useRef<HTMLButtonElement>(null);
+  const exportDataButtonRef = useRef<HTMLButtonElement>(null);
+  const exportCancelButtonRef = useRef<HTMLButtonElement>(null);
+  const exportTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const exportInProgressRef = useRef(false);
   const selectedRef = useRef<Plot | null>(null);
   const serialPortRef = useRef<SerialPortLike | null>(null);
   const serialReaderRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
@@ -286,6 +295,32 @@ export default function Home() {
     scanAlertOpenedAtRef.current = performance.now();
     setScanAlert(alert);
   }, []);
+
+  const closeExportPrompt = useCallback(() => {
+    exportInProgressRef.current = false;
+    setExportPrompt(null);
+    window.setTimeout(() => exportTriggerRef.current?.focus(), 0);
+  }, []);
+
+  useEffect(() => {
+    if (!exportPrompt) return;
+    window.setTimeout(() => exportPrimaryButtonRef.current?.focus(), 0);
+    const handleKeyboard = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !exportPrompt.busy) {
+        event.preventDefault();
+        closeExportPrompt();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const buttons = [exportPrimaryButtonRef.current, exportDataButtonRef.current, exportCancelButtonRef.current].filter((button): button is HTMLButtonElement => Boolean(button && !button.disabled));
+      if (!buttons.length) return;
+      const first = buttons[0]; const last = buttons[buttons.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    window.addEventListener("keydown", handleKeyboard, true);
+    return () => window.removeEventListener("keydown", handleKeyboard, true);
+  }, [exportPrompt, closeExportPrompt]);
 
   useEffect(() => {
     if (!scanAlert) return;
@@ -544,12 +579,29 @@ export default function Home() {
     finally { setSaving(false); }
   }
 
-  function exportSession(format: "xlsx" | "csv", filteredOnly = false) {
-    if (!session || !window.GdmWeighingUtils) { toast.error("Load a weighing session before exporting."); return; }
-    const exportPlots = filteredOnly ? filteredPlots : plots;
-    if (!exportPlots.length) { toast.error("No plot records match the current filters."); return; }
-    try { const count = window.GdmWeighingUtils.exportSession(session, weights, format, exportPlots, decimalPlaces); toast.success(`${count} ${filteredOnly ? "filtered " : ""}plot records exported to ${format === "xlsx" ? "Excel" : "CSV"} with ${decimalPlaces} decimal place${decimalPlaces === 1 ? "" : "s"}.`); }
-    catch (error) { toast.error(error instanceof Error ? error.message : "Could not export the session."); }
+  function openExportPrompt(format: "xlsx" | "csv", trigger: HTMLButtonElement) {
+    if (!session || !filteredPlots.length) { toast.error("No plot records match the current filters."); return; }
+    exportTriggerRef.current = trigger;
+    setExportPrompt({ format, error: "", busy: false });
+  }
+
+  function exportFiltered(includeLots: boolean) {
+    if (!exportPrompt || exportInProgressRef.current || !session || !window.GdmWeighingUtils) return;
+    exportInProgressRef.current = true;
+    setExportPrompt((current) => current ? { ...current, error: "", busy: true } : current);
+    try {
+      if (includeLots) {
+        const result = window.GdmWeighingUtils.exportSessionAndLots(session, weights, exportPrompt.format, filteredPlots, decimalPlaces);
+        toast.success(`${result.sessionCount} filtered plot records and ${result.lotCount} lot record${result.lotCount === 1 ? "" : "s"} exported to ${exportPrompt.format === "xlsx" ? "Excel" : "CSV"}.`);
+      } else {
+        const count = window.GdmWeighingUtils.exportSession(session, weights, exportPrompt.format, filteredPlots, decimalPlaces);
+        toast.success(`${count} filtered plot records exported to ${exportPrompt.format === "xlsx" ? "Excel" : "CSV"} with ${decimalPlaces} decimal place${decimalPlaces === 1 ? "" : "s"}.`);
+      }
+      closeExportPrompt();
+    } catch (error) {
+      exportInProgressRef.current = false;
+      setExportPrompt((current) => current ? { ...current, error: error instanceof Error ? error.message : "Could not prepare the export files.", busy: false } : current);
+    }
   }
 
   function exportLots(format: "xlsx" | "csv") {
@@ -650,6 +702,21 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#edf3f8] pb-10 text-[#17365a]">
       <Toaster position="top-center" richColors />
+      {exportPrompt && <div className="fixed inset-0 z-[110] grid place-items-center bg-[#102840]/65 p-4" aria-hidden="false">
+        <section ref={exportDialogRef} role="dialog" aria-modal="true" aria-labelledby="export-prompt-title" aria-describedby="export-prompt-description" className="w-full max-w-xl overflow-hidden rounded-xl border-2 border-[#315f8b] bg-white shadow-[0_24px_70px_rgba(10,31,53,.4)]">
+          <div className="bg-[#eaf3fb] px-6 py-5 text-center text-[#173f66]"><Download className="mx-auto size-12" strokeWidth={2.2} /><h2 id="export-prompt-title" className="mt-2 text-2xl font-black">Export filtered {exportPrompt.format === "xlsx" ? "Excel" : "CSV"}</h2></div>
+          <div className="p-6 text-center">
+            <p id="export-prompt-description" className="text-base font-semibold leading-relaxed text-[#284966]">Export {filteredPlots.length} filtered plot record{filteredPlots.length === 1 ? "" : "s"}. Would you also like to export the matching lot file?</p>
+            <p className="mt-2 text-sm text-[#60768d]">The lot file includes only weighed plots and is validated before either download starts.</p>
+            {exportPrompt.error && <div role="alert" className="mt-4 rounded-lg border border-[#f2c8be] bg-[#fff4f1] px-4 py-3 text-left text-sm font-bold text-[#963827]"><CircleAlert className="mr-2 inline size-5" />{exportPrompt.error}</div>}
+            <div className="mt-6 flex flex-col justify-center gap-2 sm:flex-row">
+              <Button ref={exportPrimaryButtonRef} type="button" disabled={exportPrompt.busy} onClick={() => exportFiltered(true)} className="h-12 bg-[#1f4269] px-5 font-extrabold text-white hover:bg-[#173756]">{exportPrompt.busy ? <LoaderCircle className="animate-spin" /> : <Download />} Export data + lots</Button>
+              <Button ref={exportDataButtonRef} type="button" variant="outline" disabled={exportPrompt.busy} onClick={() => exportFiltered(false)} className="h-12 border-[#547fa6] px-5 font-extrabold text-[#285882]">Export data only</Button>
+              <Button ref={exportCancelButtonRef} type="button" variant="ghost" disabled={exportPrompt.busy} onClick={closeExportPrompt} className="h-12 px-5 font-bold">Cancel</Button>
+            </div>
+          </div>
+        </section>
+      </div>}
       {scanAlert && <div className="fixed inset-0 z-[100] grid place-items-center bg-[#102840]/65 p-4" aria-hidden="false">
         <section role="alertdialog" aria-modal="true" aria-labelledby="scan-alert-title" aria-describedby="scan-alert-message" className={`w-full max-w-lg overflow-hidden rounded-xl border-2 bg-white shadow-[0_24px_70px_rgba(10,31,53,.4)] ${scanAlert.kind === "existing" ? "border-[#d18b16]" : "border-[#b42318]"}`}>
           <div className={`grid justify-items-center px-6 py-7 text-center ${scanAlert.kind === "existing" ? "bg-[#fff4d6] text-[#754c00]" : "bg-[#fff0ee] text-[#962b20]"}`}>
@@ -705,8 +772,6 @@ export default function Home() {
               <div className="flex flex-wrap items-center gap-2">
                 <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={(event) => void handleImport(event)} className="hidden" />
                 <Button type="button" disabled={importing || loading} onClick={() => fileRef.current?.click()} className="h-9 rounded-[5px] border border-[#547fa6] bg-[#eaf3fb] px-3 font-bold text-[#285882] hover:bg-[#dceaf6]">{importing ? <LoaderCircle className="size-4 animate-spin" /> : <Upload className="size-4" />} {importing ? "Importing…" : "Import Excel / CSV"}</Button>
-                <Button type="button" disabled={!session} onClick={() => exportSession("xlsx")} className="h-9 rounded-[5px] bg-[#c88918] px-3 font-bold text-white hover:bg-[#b77710]"><Download className="size-4" /> Export Excel</Button>
-                <Button type="button" disabled={!session} onClick={() => exportSession("csv")} className="h-9 rounded-[5px] bg-[#c88918] px-3 font-bold text-white hover:bg-[#b77710]"><Download className="size-4" /> Export CSV</Button>
               </div>
             </div>
             <p className="mt-3 text-xs font-semibold text-[#60768d]">{session ? `Active session: ${session.name} · ${activePlots.length} of ${plots.length} plots in the trial filter · last changed ${formatDateTime(session.updatedAt)}` : "No weighing session loaded. Import a workbook to begin."}</p>
@@ -741,8 +806,8 @@ export default function Home() {
                 <Input id="plot-weight" ref={weightRef} inputMode="decimal" value={weightValue} onChange={(event) => { weightEditedRef.current = true; exactPendingWeightRef.current = null; setWeightValue(event.target.value); }} className="mt-3 h-16 border-2 bg-white px-4 text-3xl font-black" placeholder={formatInputNumber(0, decimalPlaces)} />
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   <label className="text-xs font-bold uppercase tracking-[.08em] text-[#526f89]">Lot site<Input value={lotSite} onChange={(event) => setLotSite(event.target.value)} className="mt-1 h-10 bg-white text-sm font-semibold normal-case tracking-normal" placeholder="Lot site" /></label>
-                  <label className="text-xs font-bold uppercase tracking-[.08em] text-[#526f89]">Lot location<Input value={lotLocation} onChange={(event) => setLotLocation(event.target.value)} className="mt-1 h-10 bg-white text-sm font-semibold normal-case tracking-normal" placeholder="Lot location" /></label>
-                  <label className="text-xs font-bold uppercase tracking-[.08em] text-[#526f89] sm:col-span-2">Storage<Input value={lotStorage} onChange={(event) => setLotStorage(event.target.value)} className="mt-1 h-10 bg-white text-sm font-semibold normal-case tracking-normal" placeholder="Storage" /></label>
+                  <label className="text-xs font-bold uppercase tracking-[.08em] text-[#526f89]">Storage<Input value={lotStorage} onChange={(event) => setLotStorage(event.target.value)} className="mt-1 h-10 bg-white text-sm font-semibold normal-case tracking-normal" placeholder="Storage" /></label>
+                  <label className="text-xs font-bold uppercase tracking-[.08em] text-[#526f89] sm:col-span-2">Lot location<Input value={lotLocation} onChange={(event) => setLotLocation(event.target.value)} className="mt-1 h-10 bg-white text-sm font-semibold normal-case tracking-normal" placeholder="Lot location" /></label>
                 </div>
                 <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs font-bold text-[#365b80]"><input type="checkbox" checked={keepLotContext} onChange={(event) => void changeKeepLotContext(event.target.checked)} className="mt-0.5 accent-[#1f4269]" /><span>Keep Lot site, Lot location and Storage for next plot</span></label>
                 <Button type="submit" disabled={saving} className="mt-3 h-12 w-full rounded-[5px] bg-[#1f4269] text-base font-black">{saving ? <LoaderCircle className="animate-spin" /> : <Check />} {existingWeight ? `Update ${currentWeightLabel}` : `Save ${currentWeightLabel}`}</Button>
@@ -757,7 +822,7 @@ export default function Home() {
           <div className="flex items-start justify-between border-b-2 border-[#d6e3ef] pb-3"><div><p className="text-sm font-bold uppercase tracking-[.1em] text-[#315b86]">◴ Real-time report</p><h1 className="text-[29px] font-extrabold">Weighing dashboard</h1></div><span className="rounded-full bg-[#eaf3fb] px-3 py-1.5 text-sm font-bold text-[#315f8b]">● Live local data</span></div>
           <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-[.55fr_.55fr_.55fr_1.4fr]">{[["Total expected",overall.total],["Weighed",overall.completed],["Pending",overall.remaining]].map(([label,value]) => <article key={label} className="rounded-lg bg-[#1f4269] p-5 text-white"><p className="text-xs font-bold uppercase tracking-[.08em] text-white/65">{label}</p><strong className="text-3xl">{value}</strong></article>)}<article className="rounded-lg bg-[#1f4269] p-5 text-white md:col-span-3 xl:col-span-1"><p className="text-xs font-bold uppercase tracking-[.08em] text-white/65">Completion</p><strong className="text-3xl">{overall.percent}%</strong><div className="mt-3 h-2 overflow-hidden rounded-full bg-white/15"><div className="h-full bg-[#8bb7df]" style={{ width: `${overall.percent}%` }} /></div></article></div>
           {[{ title: "Progress by trial", items: trialProgress, icon: "Trials" }, { title: "Progress by location", items: locationProgress, icon: "Locations" }].map((group) => <section key={group.title} className="rounded-lg border border-[#cbdcec] bg-white p-5 shadow-[0_10px_28px_rgba(26,59,93,.08)] sm:p-6"><div className="border-b-2 border-[#d6e3ef] pb-3"><p className="text-sm font-bold uppercase tracking-[.1em] text-[#315b86]">{group.icon}</p><h2 className="text-2xl font-extrabold">{group.title}</h2></div><div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{group.items.length ? group.items.map((item) => <DonutCard key={item.key} item={item} />) : <p className="text-sm text-[#657b90]">No data available for this session.</p>}</div></section>)}
-          <section className="rounded-lg border border-[#cbdcec] bg-white p-5 shadow-[0_10px_28px_rgba(26,59,93,.08)] sm:p-6"><div className="flex flex-wrap items-end justify-between gap-3 border-b-2 border-[#d6e3ef] pb-3"><div><p className="text-sm font-bold uppercase tracking-[.1em] text-[#315b86]"><Gauge className="mr-1 inline size-4" /> Plot records</p><h2 className="text-2xl font-extrabold">Weighing data</h2></div><div className="flex flex-wrap items-center justify-end gap-2"><strong className="mr-1 text-sm text-[#60768d]">{filteredPlots.length} record{filteredPlots.length === 1 ? "" : "s"}</strong><Button type="button" disabled={!filteredPlots.length} onClick={() => exportSession("xlsx", true)} className="h-9 bg-[#c88918] text-white hover:bg-[#b77710]"><Download className="size-4" /> Export filtered Excel</Button><Button type="button" disabled={!filteredPlots.length} onClick={() => exportSession("csv", true)} className="h-9 bg-[#c88918] text-white hover:bg-[#b77710]"><Download className="size-4" /> Export filtered CSV</Button><Button type="button" disabled={!filteredPlots.some((plot) => weightsByUuid.has(normalize(plot.uuid)))} onClick={() => exportLots("xlsx")} className="h-9 bg-[#315f8b] text-white hover:bg-[#244b70]"><Download className="size-4" /> Export lots Excel</Button><Button type="button" disabled={!filteredPlots.some((plot) => weightsByUuid.has(normalize(plot.uuid)))} onClick={() => exportLots("csv")} className="h-9 bg-[#315f8b] text-white hover:bg-[#244b70]"><Download className="size-4" /> Export lots CSV</Button></div></div>
+          <section className="rounded-lg border border-[#cbdcec] bg-white p-5 shadow-[0_10px_28px_rgba(26,59,93,.08)] sm:p-6"><div className="flex flex-wrap items-end justify-between gap-3 border-b-2 border-[#d6e3ef] pb-3"><div><p className="text-sm font-bold uppercase tracking-[.1em] text-[#315b86]"><Gauge className="mr-1 inline size-4" /> Plot records</p><h2 className="text-2xl font-extrabold">Weighing data</h2></div><div className="flex flex-wrap items-center justify-end gap-2"><strong className="mr-1 text-sm text-[#60768d]">{filteredPlots.length} record{filteredPlots.length === 1 ? "" : "s"}</strong><Button type="button" disabled={!filteredPlots.length} onClick={(event) => openExportPrompt("xlsx", event.currentTarget)} className="h-9 bg-[#c88918] text-white hover:bg-[#b77710]"><Download className="size-4" /> Export filtered Excel</Button><Button type="button" disabled={!filteredPlots.length} onClick={(event) => openExportPrompt("csv", event.currentTarget)} className="h-9 bg-[#c88918] text-white hover:bg-[#b77710]"><Download className="size-4" /> Export filtered CSV</Button><Button type="button" disabled={!filteredPlots.some((plot) => weightsByUuid.has(normalize(plot.uuid)))} onClick={() => exportLots("xlsx")} className="h-9 bg-[#315f8b] text-white hover:bg-[#244b70]"><Download className="size-4" /> Export lots Excel</Button><Button type="button" disabled={!filteredPlots.some((plot) => weightsByUuid.has(normalize(plot.uuid)))} onClick={() => exportLots("csv")} className="h-9 bg-[#315f8b] text-white hover:bg-[#244b70]"><Download className="size-4" /> Export lots CSV</Button></div></div>
             <div className="my-4 grid gap-2 md:grid-cols-2 xl:grid-cols-[1.5fr_.7fr_.7fr_.7fr]"><div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#6e94b9]" /><Input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} className="h-11 pl-9" placeholder="Search FEID, UUID, OBS or names…" /></div><NativeSelect value={trialFilter} onChange={(event) => { setTrialFilter(event.target.value); setPage(1); }} className="h-11 bg-white px-2"><NativeSelectOption value="">All trials</NativeSelectOption>{trials.filter((value) => selectedTrialSet.has(value)).map((value) => <NativeSelectOption key={value} value={value}>{value}</NativeSelectOption>)}</NativeSelect><NativeSelect value={locationFilter} onChange={(event) => { setLocationFilter(event.target.value); setPage(1); }} className="h-11 bg-white px-2"><NativeSelectOption value="">All locations</NativeSelectOption>{locations.map((value) => <NativeSelectOption key={value} value={value}>{value}</NativeSelectOption>)}</NativeSelect><NativeSelect value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }} className="h-11 bg-white px-2"><NativeSelectOption value="">All statuses</NativeSelectOption><NativeSelectOption value="weighed">Weighed</NativeSelectOption><NativeSelectOption value="pending">Pending</NativeSelectOption></NativeSelect></div>
             <div className="mb-3 flex flex-col justify-between gap-3 text-sm text-[#60768d] sm:flex-row sm:items-center"><span>{paginationSummary}</span><div className="flex items-center gap-2"><Button variant="outline" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(value - 1, 1))}>← Previous</Button><span>Page {safePage} of {pageCount}</span><Button variant="outline" disabled={safePage >= pageCount} onClick={() => setPage((value) => Math.min(value + 1, pageCount))}>Next →</Button></div></div>
             <div className="overflow-auto rounded-lg border border-[#d4e0eb]"><table className="w-full whitespace-nowrap text-left text-xs"><thead className="bg-[#1f4269] text-white"><tr>{tableColumns.map(([label,key]) => <th key={key} className="p-0 text-[11px] uppercase tracking-wide"><button type="button" onClick={() => changeSort(key)} className="w-full p-3 text-left font-bold">{label} <span className={sort.key === key ? "text-white" : "text-[#9fc0df]"}>{sort.key === key ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</span></button></th>)}</tr></thead><tbody>{pageRows.length ? pageRows.map((plot,index) => { const record = weightsByUuid.get(normalize(plot.uuid)); return <tr key={plot.uuid} className={index % 2 ? "bg-[#f7fafd]" : "bg-white"}><td className="p-2.5"><span className={`rounded-full px-2 py-1 font-bold ${record ? "bg-[#daf0e9] text-[#1d6e59]" : "bg-[#eef1f4] text-[#6b7b88]"}`}>{record ? "Weighed" : "Pending"}</span></td>{[plot.seasonYear,plot.entityName,plot.obsName,plot.feid,plot.uuid,plot.block,plot.entryCode,plot.row,plot.column,plot.gerName || "—"].map((value,i) => <td key={i} className="max-w-64 overflow-hidden text-ellipsis border-b border-[#e0e8ef] p-2.5" title={value}>{value}</td>)}<td className="border-b p-2.5">{record ? formatNumber(record.weight, decimalPlaces) : "—"}</td><td className="border-b p-2.5">{record ? formatDateTime(record.weighedAt || record.updatedAt) : "—"}</td></tr>; }) : <tr><td colSpan={13} className="p-8 text-center text-[#657b90]">No plots match the current filters.</td></tr>}</tbody></table></div>

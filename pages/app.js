@@ -11,6 +11,7 @@
     exactPendingWeight: null, weightEdited: false,
     lotSite: "", lotLocation: "", lotStorage: "", carriedLotSite: "", carriedLotLocation: "", carriedStorage: "", keepLotContext: true, hasLotContext: false,
     scanAlert: null, scanAlertOpenedAt: 0,
+    exportPromptFormat: null, exportBusy: false, exportTrigger: null,
     selectedTrials: new Set(), sortKey: "", sortDirection: "asc", filteredPlots: [],
   };
   const byFeid = new Map();
@@ -22,11 +23,12 @@
     sessionSelect: $("session-select"), renameSession: $("rename-session"), deleteSession: $("delete-session"), newSession: $("new-session"),
     trialSlicerButton: $("trial-slicer-button"), trialSlicerMenu: $("trial-slicer-menu"), trialSlicerOptions: $("trial-slicer-options"), trialSelectAll: $("trial-select-all"), trialClearAll: $("trial-clear-all"),
     weighingView: $("weighing-view"), dashboardView: $("dashboard-view"),
-    importData: $("import-data"), dataFile: $("data-file"), exportExcel: $("export-excel"), exportCsv: $("export-csv"), datasetNote: $("dataset-note"),
+    importData: $("import-data"), dataFile: $("data-file"), datasetNote: $("dataset-note"),
     scanForm: $("scan-form"), weightVariable: $("weight-variable"), scanMode: $("scan-mode"), scanValue: $("scan-value"), scanError: $("scan-error"), quickFlow: $("quick-flow"),
     plotCard: $("plot-card"), weightForm: $("weight-form"), weight: $("plot-weight"), weightFieldLabel: $("weight-field-label"), lotSite: $("lot-site"), lotLocation: $("lot-location"), lotStorage: $("lot-storage"), keepLotContext: $("keep-lot-context"), saveButton: $("save-button"), existingBadge: $("existing-badge"),
     recentList: $("recent-list"), recentEmpty: $("recent-empty"), toast: $("toast"),
     scanAlert: $("scan-alert"), scanAlertTitle: $("scan-alert-title"), scanAlertMessage: $("scan-alert-message"), scanAlertAction: $("scan-alert-action"), scanAlertUpdate: $("scan-alert-update"), scanAlertHint: $("scan-alert-hint"),
+    exportPrompt: $("export-prompt"), exportPromptTitle: $("export-prompt-title"), exportPromptDescription: $("export-prompt-description"), exportPromptError: $("export-prompt-error"), exportDataLots: $("export-data-lots"), exportDataOnly: $("export-data-only"), exportCancel: $("export-cancel"),
     connectScale: $("connect-scale"), baudRate: $("baud-rate"), scaleFactor: $("scale-factor"), decimalPlaces: $("decimal-places"), scaleStatus: $("scale-status"), scaleWeight: $("scale-weight"), scaleReadingNote: $("scale-reading-note"), serialHelp: $("serial-help"),
     tableSearch: $("table-search"), trialFilter: $("trial-filter"), locationFilter: $("location-filter"), statusFilter: $("status-filter"), tableBody: $("plot-table-body"),
     pagePrev: $("page-prev"), pageNext: $("page-next"), pageNumber: $("page-number"), pageSummary: $("page-summary"), tableCount: $("table-count"),
@@ -186,8 +188,6 @@
     refs.datasetNote.textContent = state.session
       ? `Active session: ${state.session.name} · ${visiblePlots.length} of ${state.plots.length} plots in the trial filter · last changed ${formatDateTime(state.session.updatedAt)}`
       : "No weighing session loaded. Import a workbook to begin.";
-    refs.exportExcel.disabled = !state.session;
-    refs.exportCsv.disabled = !state.session;
     renderRecent();
     renderDashboard();
   }
@@ -394,12 +394,57 @@
     finally { refs.importData.disabled = false; refs.importData.textContent = "⇧ Import Excel / CSV"; refs.dataFile.value = ""; }
   }
 
-  function exportData(format, filteredOnly = false) {
-    if (!state.session) { showToast("Load a weighing session before exporting.", true); return; }
-    const exportPlots = filteredOnly ? state.filteredPlots : state.plots;
-    if (!exportPlots.length) { showToast("No plot records match the current filters.", true); return; }
-    try { const count = window.GdmWeighingUtils.exportSession(state.session, state.weights, format, exportPlots, state.decimalPlaces); showToast(`${count} ${filteredOnly ? "filtered " : ""}plot records exported to ${format === "xlsx" ? "Excel" : "CSV"} with ${state.decimalPlaces} decimal place${state.decimalPlaces === 1 ? "" : "s"}.`); }
-    catch (error) { showToast(error instanceof Error ? error.message : "Could not export the session.", true); }
+  function setExportBusy(busy) {
+    state.exportBusy = busy;
+    refs.exportDataLots.disabled = busy;
+    refs.exportDataOnly.disabled = busy;
+    refs.exportCancel.disabled = busy;
+    refs.exportDataLots.textContent = busy ? "Preparing files…" : "⇩ Export data + lots";
+  }
+
+  function openExportPrompt(format, trigger) {
+    if (!state.session || !state.filteredPlots.length) { showToast("No plot records match the current filters.", true); return; }
+    state.exportPromptFormat = format;
+    state.exportTrigger = trigger;
+    refs.exportPromptTitle.textContent = `Export filtered ${format === "xlsx" ? "Excel" : "CSV"}`;
+    refs.exportPromptDescription.textContent = `Export ${state.filteredPlots.length} filtered plot record${state.filteredPlots.length === 1 ? "" : "s"}. Would you also like to export the matching lot file?`;
+    refs.exportPromptError.hidden = true;
+    refs.exportPromptError.textContent = "";
+    setExportBusy(false);
+    refs.exportPrompt.hidden = false;
+    setTimeout(() => refs.exportDataLots.focus(), 0);
+  }
+
+  function closeExportPrompt() {
+    const trigger = state.exportTrigger;
+    state.exportPromptFormat = null;
+    state.exportTrigger = null;
+    setExportBusy(false);
+    refs.exportPrompt.hidden = true;
+    setTimeout(() => trigger?.focus(), 0);
+  }
+
+  function exportPromptChoice(includeLots) {
+    if (!state.exportPromptFormat || state.exportBusy || !state.session) return;
+    const format = state.exportPromptFormat;
+    setExportBusy(true);
+    refs.exportPromptError.hidden = true;
+    try {
+      if (includeLots) {
+        const result = window.GdmWeighingUtils.exportSessionAndLots(state.session, state.weights, format, state.filteredPlots, state.decimalPlaces);
+        closeExportPrompt();
+        showToast(`${result.sessionCount} filtered plot records and ${result.lotCount} lot record${result.lotCount === 1 ? "" : "s"} exported to ${format === "xlsx" ? "Excel" : "CSV"}.`);
+      } else {
+        const count = window.GdmWeighingUtils.exportSession(state.session, state.weights, format, state.filteredPlots, state.decimalPlaces);
+        closeExportPrompt();
+        showToast(`${count} filtered plot records exported to ${format === "xlsx" ? "Excel" : "CSV"} with ${state.decimalPlaces} decimal place${state.decimalPlaces === 1 ? "" : "s"}.`);
+      }
+    } catch (error) {
+      setExportBusy(false);
+      refs.exportPromptError.textContent = error instanceof Error ? error.message : "Could not prepare the export files.";
+      refs.exportPromptError.hidden = false;
+      refs.exportDataLots.focus();
+    }
   }
 
   function exportLots(format) {
@@ -500,6 +545,19 @@
   });
   refs.scanAlertAction.addEventListener("click", () => { if (state.scanAlert === "existing") keepExistingWeight(); else closeScanAlert(); });
   refs.scanAlertUpdate.addEventListener("click", updateExistingWeight);
+  refs.exportDataLots.addEventListener("click", () => exportPromptChoice(true));
+  refs.exportDataOnly.addEventListener("click", () => exportPromptChoice(false));
+  refs.exportCancel.addEventListener("click", closeExportPrompt);
+  document.addEventListener("keydown", (event) => {
+    if (!state.exportPromptFormat) return;
+    if (event.key === "Escape" && !state.exportBusy) { event.preventDefault(); event.stopPropagation(); closeExportPrompt(); return; }
+    if (event.key !== "Tab") return;
+    const buttons = [refs.exportDataLots, refs.exportDataOnly, refs.exportCancel].filter((button) => !button.disabled);
+    if (!buttons.length) return;
+    const first = buttons[0]; const last = buttons[buttons.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }, true);
   document.addEventListener("keydown", (event) => {
     if (!state.scanAlert) return;
     if (event.key === "Tab") {
@@ -546,10 +604,8 @@
   refs.connectScale.addEventListener("click", () => void toggleScaleConnection());
   refs.importData.addEventListener("click", () => refs.dataFile.click());
   refs.dataFile.addEventListener("change", () => { const [file] = refs.dataFile.files || []; if (file) void importFile(file); });
-  refs.exportExcel.addEventListener("click", () => exportData("xlsx"));
-  refs.exportCsv.addEventListener("click", () => exportData("csv"));
-  refs.dashboardExportExcel.addEventListener("click", () => exportData("xlsx", true));
-  refs.dashboardExportCsv.addEventListener("click", () => exportData("csv", true));
+  refs.dashboardExportExcel.addEventListener("click", (event) => openExportPrompt("xlsx", event.currentTarget));
+  refs.dashboardExportCsv.addEventListener("click", (event) => openExportPrompt("csv", event.currentTarget));
   refs.dashboardLotsExcel.addEventListener("click", () => exportLots("xlsx"));
   refs.dashboardLotsCsv.addEventListener("click", () => exportLots("csv"));
   refs.sessionSelect.addEventListener("change", () => void setActiveSession(refs.sessionSelect.value));
