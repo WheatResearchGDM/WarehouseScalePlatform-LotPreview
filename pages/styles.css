@@ -67,7 +67,7 @@ h2 { margin: 0; color: #173a61; font-size: 23px; letter-spacing: -.02em; }
 .scale-reading strong { display: block; margin: 2px 0; color: #173a61; font-size: 27px; line-height: 1; }
 .scale-reading strong.is-live { color: #237a63; }
 .serial-help { margin: 7px 2px 0; color: #74857b; font-size: 11px; }
-.scan-form { margin-top: 18px; padding: 14px; display: grid; grid-template-columns: 190px minmax(0,1fr); gap: 12px; align-items: end; border: 1px solid #cbdcec; border-radius: 5px; background: #f8fbfe; }
+.scan-form { margin-top: 18px; padding: 14px; display: grid; grid-template-columns: 190px 190px minmax(0,1fr); gap: 12px; align-items: end; border: 1px solid #cbdcec; border-radius: 5px; background: #f8fbfe; }
 label > span, .weight-form label { display: block; margin-bottom: 8px; color: #365b80; font-size: 14px; font-weight: 800; }
 .scan-form select, .input-with-icon input, .weight-form input { width: 100%; height: 56px; border: 2px solid #d1dfed; border-radius: 5px; outline: none; background: #fff; color: #173a61; }
 .scan-form select, .input-with-icon input { padding: 0 16px; font-weight: 700; }

@@ -4,6 +4,7 @@
   const DB_VERSION = 1;
   const ACTIVE_SESSION_KEY = "active-session-id";
   const LOT_SITE_MIGRATION_KEY = "lot-site-v1-migrated";
+  const WEIGHT_VARIABLE_MIGRATION_KEY = "weight-variable-v1-migrated";
   const LEGACY_PLOTS_KEY = "gdm-warehouse-scale-plots-v1";
   const LEGACY_WEIGHTS_KEY = "gdm-warehouse-scale-weights-v1";
 
@@ -45,6 +46,7 @@
     return `${baseName(fileName)} – ${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}`;
   }
   function normalize(value) { return String(value || "").trim().toUpperCase(); }
+  function normalizeWeightVariable(value) { return value === "seedWeight" ? "seedWeight" : "plotWeight"; }
   function lotContextKey(sessionId) { return `lot-context::${sessionId}`; }
   async function getSetting(database, key) {
     const tx = database.transaction("settings", "readonly");
@@ -66,21 +68,22 @@
     const tx = database.transaction("sessions", "readonly");
     return (await requestResult(tx.objectStore("sessions").get(id))) || null;
   }
-  async function createSession(database, plots, fileName, name, initialWeights = []) {
+  async function createSession(database, plots, fileName, name, weightVariable = "plotWeight", initialWeights = []) {
     const now = new Date().toISOString();
-    const session = { id: uuid(), name: name || localName(fileName), sourceFileName: fileName || "Imported workbook", createdAt: now, updatedAt: now, version: 2, plots };
+    const selectedVariable = normalizeWeightVariable(weightVariable);
+    const session = { id: uuid(), name: name || localName(fileName), sourceFileName: fileName || "Imported workbook", createdAt: now, updatedAt: now, version: 3, weightVariable: selectedVariable, plots };
     const tx = database.transaction(["sessions", "weights", "settings"], "readwrite");
     tx.objectStore("sessions").put(session);
     const weightsStore = tx.objectStore("weights");
     const byUuid = new Map(plots.map((plot) => [normalize(plot.uuid), plot]));
     for (const item of initialWeights) {
       const plot = byUuid.get(normalize(item.uuid));
-      if (!plot || !Number.isFinite(Number(item.weight)) || Number(item.weight) < 0) continue;
+      if (!plot || normalizeWeightVariable(item.weightVariable) !== selectedVariable || !Number.isFinite(Number(item.weight)) || Number(item.weight) < 0) continue;
       const timestamp = item.weighedAt || now;
       weightsStore.put({
         key: `${session.id}::${normalize(plot.uuid)}`, sessionId: session.id, uuid: plot.uuid, feid: plot.feid,
         entityName: plot.entityName, obsName: plot.obsName, weight: Number(item.weight), weighedAt: timestamp,
-        updatedAt: timestamp, source: item.source || "import", lotSite: item.lotSite ?? "",
+        updatedAt: timestamp, source: item.source || "import", weightVariable: selectedVariable, lotSite: item.lotSite ?? "",
         lotLocation: item.lotLocation ?? "", storage: item.storage ?? "",
       });
     }
@@ -98,17 +101,18 @@
     if (!sessionId || !plot?.uuid || !Number.isFinite(numericWeight) || numericWeight < 0) throw new Error("A valid plot and non-negative weight are required.");
     const parsed = new Date(weighedAt);
     const iso = Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
-    const record = {
-      key: `${sessionId}::${normalize(plot.uuid)}`, sessionId, uuid: plot.uuid, feid: plot.feid,
-      entityName: plot.entityName, obsName: plot.obsName, weight: numericWeight, weighedAt: iso,
-      updatedAt: iso, source, lotSite: String(lot.lotSite ?? "").trim(),
-      lotLocation: String(lot.lotLocation ?? "").trim(), storage: String(lot.storage ?? "").trim(),
-    };
     const tx = database.transaction(["weights", "sessions", "settings"], "readwrite");
-    tx.objectStore("weights").put(record);
     const sessionsStore = tx.objectStore("sessions");
     const session = await requestResult(sessionsStore.get(sessionId));
     if (!session) { tx.abort(); throw new Error("The active weighing session no longer exists."); }
+    const weightVariable = normalizeWeightVariable(session.weightVariable);
+    const record = {
+      key: `${sessionId}::${normalize(plot.uuid)}`, sessionId, uuid: plot.uuid, feid: plot.feid,
+      entityName: plot.entityName, obsName: plot.obsName, weight: numericWeight, weighedAt: iso,
+      updatedAt: iso, source, weightVariable, lotSite: String(lot.lotSite ?? "").trim(),
+      lotLocation: String(lot.lotLocation ?? "").trim(), storage: String(lot.storage ?? "").trim(),
+    };
+    tx.objectStore("weights").put(record);
     session.updatedAt = new Date().toISOString();
     sessionsStore.put(session);
     if (Object.prototype.hasOwnProperty.call(lot, "keepForNext")) {
@@ -133,13 +137,14 @@
     const store = tx.objectStore("weights");
     for (const entry of entries) {
       const plot = plotMap.get(normalize(entry.uuid));
-      if (!plot || !Number.isFinite(Number(entry.weight)) || Number(entry.weight) < 0) continue;
+      const weightVariable = normalizeWeightVariable(session.weightVariable);
+      if (!plot || normalizeWeightVariable(entry.weightVariable) !== weightVariable || !Number.isFinite(Number(entry.weight)) || Number(entry.weight) < 0) continue;
       const parsed = new Date(entry.weighedAt || now);
       const iso = Number.isNaN(parsed.getTime()) ? now : parsed.toISOString();
       const record = {
         key: `${sessionId}::${normalize(plot.uuid)}`, sessionId, uuid: plot.uuid, feid: plot.feid,
         entityName: plot.entityName, obsName: plot.obsName, weight: Number(entry.weight), weighedAt: iso,
-        updatedAt: iso, source: entry.source || "import", lotSite: entry.lotSite ?? "",
+        updatedAt: iso, source: entry.source || "import", weightVariable, lotSite: entry.lotSite ?? "",
         lotLocation: entry.lotLocation ?? "", storage: entry.storage ?? "",
       };
       store.put(record);
@@ -162,6 +167,21 @@
     await transactionDone(tx);
     return session;
   }
+  async function setWeightVariable(database, id, weightVariable) {
+    const nextVariable = normalizeWeightVariable(weightVariable);
+    const tx = database.transaction(["sessions", "weights"], "readwrite");
+    const sessionsStore = tx.objectStore("sessions");
+    const session = await requestResult(sessionsStore.get(id));
+    if (!session) { tx.abort(); throw new Error("Session not found."); }
+    const existing = await requestResult(tx.objectStore("weights").index("sessionId").count(id));
+    if (existing > 0) { tx.abort(); throw new Error("The weight variable cannot be changed after weights exist. Use Start New Weighing."); }
+    session.weightVariable = nextVariable;
+    session.updatedAt = new Date().toISOString();
+    session.version = Math.max(Number(session.version) || 0, 3);
+    sessionsStore.put(session);
+    await transactionDone(tx);
+    return session;
+  }
   async function deleteSession(database, id) {
     const tx = database.transaction(["sessions", "weights", "settings"], "readwrite");
     tx.objectStore("sessions").delete(id);
@@ -181,7 +201,7 @@
     try { weights = JSON.parse(localStorage.getItem(LEGACY_WEIGHTS_KEY) || "{}"); } catch { weights = {}; }
     if (!dataset?.plots?.length) return;
     const initial = Object.values(weights || {}).map((item) => ({ ...item, weighedAt: item.weighedAt || item.updatedAt || new Date().toISOString(), source: "legacy" }));
-    await createSession(database, dataset.plots, dataset.fileName || "Legacy workbook", "Imported legacy session", initial);
+    await createSession(database, dataset.plots, dataset.fileName || "Legacy workbook", "Imported legacy session", "plotWeight", initial.map((item) => ({ ...item, weightVariable: "plotWeight" })));
   }
   async function migrateLotSite(database) {
     if (await getSetting(database, LOT_SITE_MIGRATION_KEY)) return;
@@ -212,10 +232,31 @@
     settingsStore.put({ key: LOT_SITE_MIGRATION_KEY, value: true });
     await transactionDone(tx);
   }
+  async function migrateWeightVariables(database) {
+    if (await getSetting(database, WEIGHT_VARIABLE_MIGRATION_KEY)) return;
+    const tx = database.transaction(["sessions", "weights", "settings"], "readwrite");
+    const sessionsStore = tx.objectStore("sessions");
+    const weightsStore = tx.objectStore("weights");
+    const [sessions, weights] = await Promise.all([requestResult(sessionsStore.getAll()), requestResult(weightsStore.getAll())]);
+    const sessionVariables = new Map();
+    for (const session of sessions) {
+      session.weightVariable = normalizeWeightVariable(session.weightVariable);
+      session.version = Math.max(Number(session.version) || 0, 3);
+      sessionVariables.set(session.id, session.weightVariable);
+      sessionsStore.put(session);
+    }
+    for (const record of weights) {
+      record.weightVariable = sessionVariables.get(record.sessionId) || "plotWeight";
+      weightsStore.put(record);
+    }
+    tx.objectStore("settings").put({ key: WEIGHT_VARIABLE_MIGRATION_KEY, value: true });
+    await transactionDone(tx);
+  }
   async function init() {
     const database = await openDatabase();
     await migrateLegacy(database);
     await migrateLotSite(database);
+    await migrateWeightVariables(database);
     const sessions = await listSessions(database);
     let activeSessionId = await getSetting(database, ACTIVE_SESSION_KEY);
     if (!sessions.some((session) => session.id === activeSessionId)) {
@@ -226,7 +267,7 @@
   }
 
   global.GdmWeighingStore = {
-    init, listSessions, getSession, createSession, getWeights, saveWeight, saveWeights, renameSession, deleteSession,
+    init, listSessions, getSession, createSession, getWeights, saveWeight, saveWeights, renameSession, setWeightVariable, deleteSession,
     async getLotContext(database, sessionId) {
       const value = await getSetting(database, lotContextKey(sessionId));
       return value && typeof value === "object"

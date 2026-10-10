@@ -5,7 +5,7 @@
   const DECIMAL_PLACES_KEY = "gdm-warehouse-decimal-places-v1";
   const PAGE_SIZE = 100;
   const state = {
-    database: null, sessions: [], session: null, plots: [], weights: [], selected: null,
+    database: null, sessions: [], session: null, plots: [], weights: [], selected: null, weightVariable: "plotWeight",
     serialPort: null, serialReader: null, readLoop: null, keepReading: false, serialBuffer: "",
     serialFlushTimer: null, rawScaleWeight: null, scaleExponent: loadScaleExponent(), decimalPlaces: loadDecimalPlaces(), page: 1,
     exactPendingWeight: null, weightEdited: false,
@@ -23,15 +23,15 @@
     trialSlicerButton: $("trial-slicer-button"), trialSlicerMenu: $("trial-slicer-menu"), trialSlicerOptions: $("trial-slicer-options"), trialSelectAll: $("trial-select-all"), trialClearAll: $("trial-clear-all"),
     weighingView: $("weighing-view"), dashboardView: $("dashboard-view"),
     importData: $("import-data"), dataFile: $("data-file"), exportExcel: $("export-excel"), exportCsv: $("export-csv"), datasetNote: $("dataset-note"),
-    scanForm: $("scan-form"), scanMode: $("scan-mode"), scanValue: $("scan-value"), scanError: $("scan-error"),
-    plotCard: $("plot-card"), weightForm: $("weight-form"), weight: $("plot-weight"), lotSite: $("lot-site"), lotLocation: $("lot-location"), lotStorage: $("lot-storage"), keepLotContext: $("keep-lot-context"), saveButton: $("save-button"), existingBadge: $("existing-badge"),
+    scanForm: $("scan-form"), weightVariable: $("weight-variable"), scanMode: $("scan-mode"), scanValue: $("scan-value"), scanError: $("scan-error"), quickFlow: $("quick-flow"),
+    plotCard: $("plot-card"), weightForm: $("weight-form"), weight: $("plot-weight"), weightFieldLabel: $("weight-field-label"), lotSite: $("lot-site"), lotLocation: $("lot-location"), lotStorage: $("lot-storage"), keepLotContext: $("keep-lot-context"), saveButton: $("save-button"), existingBadge: $("existing-badge"),
     recentList: $("recent-list"), recentEmpty: $("recent-empty"), toast: $("toast"),
     scanAlert: $("scan-alert"), scanAlertTitle: $("scan-alert-title"), scanAlertMessage: $("scan-alert-message"), scanAlertAction: $("scan-alert-action"), scanAlertUpdate: $("scan-alert-update"), scanAlertHint: $("scan-alert-hint"),
     connectScale: $("connect-scale"), baudRate: $("baud-rate"), scaleFactor: $("scale-factor"), decimalPlaces: $("decimal-places"), scaleStatus: $("scale-status"), scaleWeight: $("scale-weight"), scaleReadingNote: $("scale-reading-note"), serialHelp: $("serial-help"),
     tableSearch: $("table-search"), trialFilter: $("trial-filter"), locationFilter: $("location-filter"), statusFilter: $("status-filter"), tableBody: $("plot-table-body"),
     pagePrev: $("page-prev"), pageNext: $("page-next"), pageNumber: $("page-number"), pageSummary: $("page-summary"), tableCount: $("table-count"),
     pagePrevTop: $("page-prev-top"), pageNextTop: $("page-next-top"), pageNumberTop: $("page-number-top"), pageSummaryTop: $("page-summary-top"),
-    dashboardExportExcel: $("dashboard-export-excel"), dashboardExportCsv: $("dashboard-export-csv"), dashboardLotsExcel: $("dashboard-lots-excel"), dashboardLotsCsv: $("dashboard-lots-csv"),
+    dashboardExportExcel: $("dashboard-export-excel"), dashboardExportCsv: $("dashboard-export-csv"), dashboardLotsExcel: $("dashboard-lots-excel"), dashboardLotsCsv: $("dashboard-lots-csv"), weightTableHeading: $("weight-table-heading"),
   };
 
   function loadScaleExponent() {
@@ -43,6 +43,7 @@
     return Number.isInteger(value) && value >= 0 && value <= 6 ? value : 0;
   }
   function normalize(value) { return window.GdmWeighingUtils.normalize(value); }
+  function weightLabel(variable = state.weightVariable) { return variable === "seedWeight" ? "Seed weight" : "Plot weight"; }
   function parseWeight(value) { const text = String(value || "").trim(); return text ? Number(text.replace(",", ".")) : NaN; }
   function formatNumber(value, places = state.decimalPlaces) { return new Intl.NumberFormat("en-US", { minimumFractionDigits: places, maximumFractionDigits: places }).format(value); }
   function formatInputNumber(value, places = state.decimalPlaces) { return new Intl.NumberFormat("en-US", { useGrouping: false, minimumFractionDigits: places, maximumFractionDigits: places }).format(value); }
@@ -89,8 +90,9 @@
     refs.scanAlertTitle.textContent = title;
     refs.scanAlertMessage.textContent = message;
     refs.scanAlertUpdate.hidden = kind !== "existing";
-    refs.scanAlertAction.textContent = kind === "existing" ? "Keep current PW" : actionLabel;
-    refs.scanAlertHint.textContent = kind === "existing" ? "Enter keeps the current PW · choose Update PW to replace it" : "Press Enter or click the button to continue";
+    refs.scanAlertUpdate.textContent = `Update ${weightLabel()}`;
+    refs.scanAlertAction.textContent = kind === "existing" ? `Keep current ${weightLabel()}` : actionLabel;
+    refs.scanAlertHint.textContent = kind === "existing" ? `Enter keeps the current ${weightLabel()} · choose Update ${weightLabel()} to replace it` : "Press Enter or click the button to continue";
     refs.scanAlert.hidden = false;
     setTimeout(() => refs.scanAlertAction.focus(), 0);
   }
@@ -134,6 +136,7 @@
     state.session = id ? await window.GdmWeighingStore.getSession(state.database, id) : null;
     state.plots = state.session?.plots || [];
     state.weights = state.session ? await window.GdmWeighingStore.getWeights(state.database, state.session.id) : [];
+    state.weightVariable = state.session?.weightVariable || "plotWeight";
     const lotContext = state.session
       ? await window.GdmWeighingStore.getLotContext(state.database, state.session.id)
       : { keepForNext: true, hasValue: false, lotSite: "", lotLocation: "", storage: "" };
@@ -153,6 +156,7 @@
     refs.scanValue.value = "";
     refs.weight.value = "";
     refs.lotSite.value = ""; refs.lotLocation.value = ""; refs.lotStorage.value = ""; refs.keepLotContext.checked = state.keepLotContext;
+    refs.weightVariable.value = state.weightVariable; refs.weightVariable.disabled = state.weights.length > 0;
     refs.weight.placeholder = formatInputNumber(0);
     await refreshSessionList();
     renderAll();
@@ -165,6 +169,15 @@
   }
 
   function renderAll() {
+    const label = weightLabel();
+    refs.weightVariable.value = state.weightVariable; refs.weightVariable.disabled = state.weights.length > 0;
+    refs.weightVariable.title = state.weights.length ? "Use Start New Weighing to change the variable after weights exist." : "";
+    refs.weightFieldLabel.textContent = `⚖ ${label}`;
+    refs.weightTableHeading.textContent = label;
+    refs.serialHelp.textContent = "serial" in navigator
+      ? `Connect the scale, choose the weight variable and identifier, then scan a plot to fill ${label} automatically.`
+      : "COM connection is not available in this browser. Open the app in Google Chrome or Microsoft Edge.";
+    refs.quickFlow.innerHTML = `<strong>Quick flow:</strong> scan to load a plot. When ${escapeHtml(label)} is filled, press Enter or scan the same plot again to save.`;
     renderTrialSlicer();
     const visiblePlots = activePlots();
     const overall = window.GdmWeighingUtils.overallProgress(visiblePlots, state.weights);
@@ -185,7 +198,7 @@
     refs.recentEmpty.hidden = recent.length > 0;
     refs.recentList.hidden = recent.length === 0;
     refs.recentList.innerHTML = recent.map((record) => `
-      <article class="recent-item"><div class="recent-item__plot"><strong>Plot ${escapeHtml(record.obsName || "—")}</strong><span>${escapeHtml(record.entityName || "Unnamed trial")} · FEID ${escapeHtml(record.feid || "—")}</span></div><div class="recent-item__weight"><small>PW</small><strong>${escapeHtml(formatNumber(Number(record.weight)))}</strong></div><time datetime="${escapeHtml(record.weighedAt || "")}">${escapeHtml(formatDateTime(record.weighedAt || record.updatedAt))}</time></article>`).join("");
+      <article class="recent-item"><div class="recent-item__plot"><strong>Plot ${escapeHtml(record.obsName || "—")}</strong><span>${escapeHtml(record.entityName || "Unnamed trial")} · FEID ${escapeHtml(record.feid || "—")}</span></div><div class="recent-item__weight"><small>${escapeHtml(weightLabel())}</small><strong>${escapeHtml(formatNumber(Number(record.weight)))}</strong></div><time datetime="${escapeHtml(record.weighedAt || "")}">${escapeHtml(formatDateTime(record.weighedAt || record.updatedAt))}</time></article>`).join("");
   }
 
   function donutCards(items) {
@@ -294,8 +307,8 @@
       refs.lotSite.value = ""; refs.lotLocation.value = ""; refs.lotStorage.value = "";
     }
     refs.existingBadge.hidden = !existing;
-    refs.existingBadge.textContent = existing ? `Already weighed: PW ${formatNumber(existing.weight)}` : "";
-    refs.saveButton.textContent = existing ? "✓ Update PW" : "✓ Save PW";
+    refs.existingBadge.textContent = existing ? `Already weighed: ${weightLabel()} ${formatNumber(existing.weight)}` : "";
+    refs.saveButton.textContent = existing ? `✓ Update ${weightLabel()}` : `✓ Save ${weightLabel()}`;
     setTimeout(() => refs.scanValue.focus(), 0);
   }
   function clearSelection() {
@@ -310,7 +323,7 @@
     }
     if (state.selected) {
       const existing = weightsMap().get(normalize(state.selected.uuid));
-      refs.existingBadge.textContent = existing ? `Already weighed: PW ${formatNumber(Number(existing.weight))}` : "";
+      refs.existingBadge.textContent = existing ? `Already weighed: ${weightLabel()} ${formatNumber(Number(existing.weight))}` : "";
       if (!state.weightEdited && state.exactPendingWeight !== null) refs.weight.value = formatInputNumber(state.exactPendingWeight);
     }
     renderRecent();
@@ -335,7 +348,7 @@
       }
       state.session.updatedAt = new Date().toISOString();
       renderAll();
-      showToast(`PW ${formatNumber(weight)} saved for plot ${plot.obsName}.`);
+      showToast(`${weightLabel()} ${formatNumber(weight)} saved for plot ${plot.obsName}.`);
       clearSelection();
     } catch (error) { showToast(error instanceof Error ? error.message : "Could not save the weight.", true); }
     finally { refs.saveButton.disabled = false; }
@@ -345,14 +358,27 @@
     refs.importData.disabled = true; refs.importData.textContent = "Importing…";
     try {
       const result = await window.GdmPlotImport.parseExcelFile(file);
-      const invalid = result.invalidRows.length + result.invalidWeightRows.length;
-      if (!state.session || !result.importedWeights.length) {
-        const session = await window.GdmWeighingStore.createSession(state.database, result.plots, result.fileName, undefined, result.importedWeights);
+      const targetVariable = state.session?.weightVariable || state.weightVariable;
+      const targetLabel = weightLabel(targetVariable);
+      const otherVariable = targetVariable === "plotWeight" ? "seedWeight" : "plotWeight";
+      const importedWeights = result.importedWeights.filter((item) => item.weightVariable === targetVariable);
+      const ignoredOtherWeights = result.importedWeights.filter((item) => item.weightVariable === otherVariable).length;
+      const relevantInvalid = result.invalidWeightRows.filter((item) => item.weightVariable === targetVariable).length;
+      const targetConflicts = result.weightConflicts.filter((item) => item.weightVariable === targetVariable);
+      const relevantConflicts = targetConflicts.length;
+      const invalid = result.invalidRows.length + relevantInvalid;
+      if (!importedWeights.length && !relevantInvalid && !relevantConflicts && ignoredOtherWeights > 0) throw new Error(`This file contains ${weightLabel(otherVariable)} values but the current session uses ${targetLabel}. Select the matching variable in an empty session or use Start New Weighing.`);
+      const importNotes = [
+        ignoredOtherWeights ? `${ignoredOtherWeights} ${weightLabel(otherVariable)} value(s) ignored` : "",
+        relevantConflicts ? `${relevantConflicts} conflicting ${targetLabel} row(s) skipped (${targetConflicts.slice(0, 5).map((item) => item.row).join(", ")}${relevantConflicts > 5 ? ", …" : ""})` : "",
+      ].filter(Boolean);
+      if (!state.session || !importedWeights.length) {
+        const session = await window.GdmWeighingStore.createSession(state.database, result.plots, result.fileName, undefined, targetVariable, importedWeights);
         await setActiveSession(session.id);
-        showToast(`Session created with ${result.plots.length} plots and ${result.importedWeights.length} weights${invalid ? `; ${invalid} invalid row(s) skipped` : ""}.`);
+        showToast(`Session created for ${targetLabel} with ${result.plots.length} plots and ${importedWeights.length} existing weight${importedWeights.length === 1 ? "" : "s"}${invalid ? `; ${invalid} invalid row(s) skipped` : ""}${importNotes.length ? `; ${importNotes.join("; ")}` : ""}.`);
         return;
       }
-      const merge = window.GdmWeighingUtils.prepareMerge(state.plots, state.weights, result.importedWeights);
+      const merge = window.GdmWeighingUtils.prepareMerge(state.plots, state.weights, importedWeights);
       let includeUnresolved = false;
       if (merge.unresolved.length) {
         includeUnresolved = window.confirm(`${merge.unresolved.length} conflicting weight(s) do not have comparable timestamps. Select OK to use the imported values, or Cancel to keep the current session values.`);
@@ -363,7 +389,7 @@
       state.session = await window.GdmWeighingStore.getSession(state.database, state.session.id);
       renderAll();
       const kept = merge.keptCurrent + (includeUnresolved ? 0 : merge.unresolved.length);
-      showToast(`Partial results: ${entries.length} imported, ${kept} current kept, ${merge.unchanged} unchanged, ${merge.ignored} unmatched, ${invalid} invalid.`);
+      showToast(`Partial ${targetLabel} results: ${entries.length} imported, ${kept} current kept, ${merge.unchanged} unchanged, ${merge.ignored} unmatched, ${invalid} invalid${importNotes.length ? `; ${importNotes.join("; ")}` : ""}.`);
     } catch (error) { showToast(error instanceof Error ? error.message : "Could not import the file.", true); }
     finally { refs.importData.disabled = false; refs.importData.textContent = "⇧ Import Excel / CSV"; refs.dataFile.value = ""; }
   }
@@ -395,7 +421,7 @@
     const value = rawValue / (10 ** state.scaleExponent);
     refs.scaleWeight.textContent = formatNumber(value); refs.scaleWeight.classList.add("is-live");
     const factor = state.scaleExponent ? ` · ${scaleFactorLabel()}` : "";
-    refs.scaleReadingNote.textContent = state.selected ? `PW filled automatically${factor}` : `Scan a plot to apply${factor}`;
+    refs.scaleReadingNote.textContent = state.selected ? `${weightLabel()} filled automatically${factor}` : `Scan a plot to apply${factor}`;
     refs.scaleWeight.title = `Raw reading: ${formatRawNumber(rawValue)}${rawLine ? ` (${String(rawLine).trim()})` : ""}`;
     if (state.selected) { state.exactPendingWeight = value; state.weightEdited = false; refs.weight.value = formatInputNumber(value); }
   }
@@ -460,9 +486,18 @@
     const record = weightsMap().get(normalize(plot.uuid));
     playScanTone(record ? "existing" : "found");
     selectPlot(plot);
-    if (record) showScanAlert("existing", "Plot already weighed", `${plotDisplayName(plot)} already has PW ${formatNumber(Number(record.weight))}. Choose whether to update it or keep the current value.`, "Keep current PW");
+    if (record) showScanAlert("existing", "Plot already weighed", `${plotDisplayName(plot)} already has ${weightLabel()} ${formatNumber(Number(record.weight))}. Choose whether to update it or keep the current value.`, `Keep current ${weightLabel()}`);
   });
   refs.scanMode.addEventListener("change", () => { refs.scanValue.placeholder = refs.scanMode.value === "feid" ? "Scan or enter the FEID" : "Scan or enter the UUID"; refs.scanValue.value = ""; refs.scanError.hidden = true; if (state.scanAlert) closeScanAlert(); else refs.scanValue.focus(); });
+  refs.weightVariable.addEventListener("change", async () => {
+    const next = refs.weightVariable.value === "seedWeight" ? "seedWeight" : "plotWeight";
+    if (state.weights.length) { refs.weightVariable.value = state.weightVariable; showToast("The weight variable cannot be changed after weights exist. Use Start New Weighing.", true); return; }
+    if (!state.session) { state.weightVariable = next; renderAll(); return; }
+    try {
+      state.session = await window.GdmWeighingStore.setWeightVariable(state.database, state.session.id, next);
+      state.weightVariable = next; await refreshSessionList(); renderAll(); showToast(`${weightLabel()} selected for this session.`);
+    } catch (error) { refs.weightVariable.value = state.weightVariable; showToast(error instanceof Error ? error.message : "Could not change the weight variable.", true); }
+  });
   refs.scanAlertAction.addEventListener("click", () => { if (state.scanAlert === "existing") keepExistingWeight(); else closeScanAlert(); });
   refs.scanAlertUpdate.addEventListener("click", updateExistingWeight);
   document.addEventListener("keydown", (event) => {
@@ -537,7 +572,7 @@
   refs.newSession.addEventListener("click", async () => {
     try {
       if (!state.session) { refs.dataFile.click(); return; }
-      const session = await window.GdmWeighingStore.createSession(state.database, state.plots, state.session.sourceFileName);
+      const session = await window.GdmWeighingStore.createSession(state.database, state.plots, state.session.sourceFileName, undefined, "plotWeight");
       await setActiveSession(session.id); showToast(`New session “${session.name}” started.`);
     } catch (error) { showToast(error instanceof Error ? error.message : "Could not start a new session.", true); }
   });

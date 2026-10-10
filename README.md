@@ -18,10 +18,10 @@ na própria tela antes da conexão.
 
 - leitura de parcelas por FEID ou UUID, compatível com leitores que funcionam como teclado;
 - conferência de Entity name, (OBS) Name, Block, Entry code, Row, Column e (GER) Name;
-- registro e atualização do PW (Plot weight);
+- registro e atualização de `Plot weight` ou `Seed weight`, escolhidos por sessão;
 - conexão direta com balanças pela porta COM usando Web Serial, com velocidade configurável;
 - fator de escala configurável para multiplicar ou dividir a leitura bruta de `10¹` a `10¹⁰`;
-- preenchimento automático do PW a partir da leitura serial;
+- preenchimento automático da variável de peso selecionada a partir da leitura serial;
 - importação de arquivos Excel `.xlsx` ou `.xls` pelo operador;
 - exportação das sessões e dos lotes filtrados em Excel ou CSV;
 - registro de Lot site e Storage por pesagem, com repetição opcional para a próxima parcela;
@@ -31,7 +31,7 @@ na própria tela antes da conexão.
 
 ## Dados
 
-O aplicativo inicia sem uma base fixa. O operador deve importar a primeira aba de um Excel que contenha os cabeçalhos: `ID`, `FEID`, `UUID`, `Season year`, `Entity name`, `Trial type`, `Location`, `Row`, `Column`, `Entry code`, `Block`, `(OBS) Name`, `GID`, `(GER) Name`, `Initial plot`, `Final plot` e `PW`. `Site` é opcional e representa apenas o local do ensaio; `Lot site` é um metadado operacional da pesagem e nunca é sugerido a partir do Excel. A planilha importada fica salva no navegador do equipamento. `Initial plot` e `Final plot` permanecem no template por compatibilidade, mas não são usados nos cálculos de progresso.
+O aplicativo inicia sem uma base fixa. O operador deve importar a primeira aba de um Excel que contenha os cabeçalhos: `ID`, `FEID`, `UUID`, `Season year`, `Entity name`, `Trial type`, `Location`, `Row`, `Column`, `Entry code`, `Block`, `(OBS) Name`, `GID`, `(GER) Name`, `Initial plot` e `Final plot`. Colunas de peso são opcionais: `Plot weight` ou o alias legado `PW`, e `Seed weight` ou o alias legado `SEED.W`. Valores numéricos existentes, incluindo zero, são retomados como parcelas já pesadas para a variável selecionada na sessão. `Site` é opcional e representa apenas o local do ensaio; `Lot site` é um metadado operacional da pesagem e nunca é sugerido a partir do Excel. A planilha importada fica salva no navegador do equipamento. `Initial plot` e `Final plot` permanecem no template por compatibilidade, mas não são usados nos cálculos de progresso.
 
 ## Desenvolvimento
 

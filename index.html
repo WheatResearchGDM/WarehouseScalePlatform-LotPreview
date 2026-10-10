@@ -69,13 +69,14 @@
             </div>
             <div class="scale-reading" aria-live="polite"><span>Current reading</span><strong id="scale-weight">—</strong><small id="scale-reading-note">Waiting for connection</small></div>
           </section>
-          <p id="serial-help" class="serial-help">Connect the scale, select FEID or UUID, then scan a plot to fill PW automatically.</p>
+          <p id="serial-help" class="serial-help">Connect the scale, choose the weight variable and identifier, then scan a plot to fill Plot weight automatically.</p>
 
           <form id="scan-form" class="scan-form">
+            <label><span>Weight variable</span><select id="weight-variable" aria-label="Weight variable"><option value="plotWeight">Plot weight</option><option value="seedWeight">Seed weight</option></select></label>
             <label><span>Identifier</span><select id="scan-mode" aria-label="Identifier type"><option value="feid">Plot FEID</option><option value="uuid">Plot UUID</option></select></label>
             <label><span>Scanned code</span><div class="input-with-icon"><b aria-hidden="true">▥</b><input id="scan-value" autocomplete="off" spellcheck="false" placeholder="Scan or enter the FEID" autofocus /></div></label>
           </form>
-          <p class="hint"><strong>Quick flow:</strong> scan to load a plot. When PW is filled, press Enter or scan the same plot again to save.</p>
+          <p id="quick-flow" class="hint"><strong>Quick flow:</strong> scan to load a plot. When Plot weight is filled, press Enter or scan the same plot again to save.</p>
           <div id="scan-error" class="alert" role="alert" hidden></div>
         </article>
 
@@ -93,10 +94,10 @@
               <div class="identifiers"><dt>Identifiers</dt><dd><span><b>FEID:</b> <i id="feid"></i></span><span><b>UUID:</b> <i id="uuid"></i></span></dd></div>
             </dl>
             <form id="weight-form" class="weight-form">
-              <label for="plot-weight">⚖ Plot weight (PW)</label><input id="plot-weight" inputmode="decimal" autocomplete="off" placeholder="0.000" />
+              <label id="weight-field-label" for="plot-weight">⚖ Plot weight</label><input id="plot-weight" inputmode="decimal" autocomplete="off" placeholder="0.000" />
               <div class="lot-fields"><label for="lot-site">Lot site<input id="lot-site" autocomplete="off" placeholder="Lot site" /></label><label for="lot-location">Lot location<input id="lot-location" autocomplete="off" placeholder="Lot location" /></label><label class="lot-storage-field" for="lot-storage">Storage<input id="lot-storage" autocomplete="off" placeholder="Storage" /></label></div>
               <label class="keep-lot-context"><input id="keep-lot-context" type="checkbox" checked /><span>Keep Lot site, Lot location and Storage for next plot</span></label>
-              <button id="save-button" type="submit">✓ Save PW</button>
+              <button id="save-button" type="submit">✓ Save Plot weight</button>
             </form>
           </div>
         </article>
@@ -119,7 +120,7 @@
           <div class="section-heading"><div><p class="eyebrow">Plot records</p><h2>Weighing data</h2></div><div class="table-heading-actions"><strong id="table-count">0 records</strong><button id="dashboard-export-excel" class="outline-button" type="button">⇩ Export filtered Excel</button><button id="dashboard-export-csv" class="outline-button" type="button">⇩ Export filtered CSV</button><button id="dashboard-lots-excel" class="outline-button lot-export-button" type="button">⇩ Export lots Excel</button><button id="dashboard-lots-csv" class="outline-button lot-export-button" type="button">⇩ Export lots CSV</button></div></div>
           <div class="filters"><input id="table-search" type="search" placeholder="Search FEID, UUID, OBS or names…" /><select id="trial-filter"><option value="">All trials</option></select><select id="location-filter"><option value="">All locations</option></select><select id="status-filter"><option value="">All statuses</option><option value="weighed">Weighed</option><option value="pending">Pending</option></select></div>
           <div class="pagination pagination--top"><span id="page-summary-top">0–0 of 0</span><div><button id="page-prev-top" type="button">← Previous</button><span id="page-number-top">Page 1 of 1</span><button id="page-next-top" type="button">Next →</button></div></div>
-          <div class="table-wrap"><table><thead><tr><th><button type="button" data-sort="status">Status</button></th><th><button type="button" data-sort="seasonYear">Season year</button></th><th><button type="button" data-sort="entityName">Entity name</button></th><th><button type="button" data-sort="obsName">(OBS) Name</button></th><th><button type="button" data-sort="feid">FEID</button></th><th><button type="button" data-sort="uuid">UUID</button></th><th><button type="button" data-sort="block">Block</button></th><th><button type="button" data-sort="entryCode">Entry code</button></th><th><button type="button" data-sort="row">Row</button></th><th><button type="button" data-sort="column">Column</button></th><th><button type="button" data-sort="gerName">(GER) Name</button></th><th><button type="button" data-sort="weight">PW</button></th><th><button type="button" data-sort="weighedAt">Weighed at</button></th></tr></thead><tbody id="plot-table-body"></tbody></table></div>
+          <div class="table-wrap"><table><thead><tr><th><button type="button" data-sort="status">Status</button></th><th><button type="button" data-sort="seasonYear">Season year</button></th><th><button type="button" data-sort="entityName">Entity name</button></th><th><button type="button" data-sort="obsName">(OBS) Name</button></th><th><button type="button" data-sort="feid">FEID</button></th><th><button type="button" data-sort="uuid">UUID</button></th><th><button type="button" data-sort="block">Block</button></th><th><button type="button" data-sort="entryCode">Entry code</button></th><th><button type="button" data-sort="row">Row</button></th><th><button type="button" data-sort="column">Column</button></th><th><button type="button" data-sort="gerName">(GER) Name</button></th><th><button id="weight-table-heading" type="button" data-sort="weight">Plot weight</button></th><th><button type="button" data-sort="weighedAt">Weighed at</button></th></tr></thead><tbody id="plot-table-body"></tbody></table></div>
           <div class="pagination"><span id="page-summary">0–0 of 0</span><div><button id="page-prev" type="button">← Previous</button><span id="page-number">Page 1 of 1</span><button id="page-next" type="button">Next →</button></div></div>
         </section>
       </section>
@@ -128,7 +129,7 @@
     <div id="scan-alert" class="scan-alert" hidden>
       <section class="scan-alert__dialog" role="alertdialog" aria-modal="true" aria-labelledby="scan-alert-title" aria-describedby="scan-alert-message">
         <div class="scan-alert__hero"><span class="scan-alert__icon" aria-hidden="true">!</span><h2 id="scan-alert-title"></h2></div>
-        <div class="scan-alert__body"><p id="scan-alert-message"></p><div class="scan-alert__actions"><button id="scan-alert-update" class="scan-alert__secondary" type="button" hidden>Update PW</button><button id="scan-alert-action" type="button"></button></div><small id="scan-alert-hint">Press Enter or click the button to continue</small></div>
+        <div class="scan-alert__body"><p id="scan-alert-message"></p><div class="scan-alert__actions"><button id="scan-alert-update" class="scan-alert__secondary" type="button" hidden>Update Plot weight</button><button id="scan-alert-action" type="button"></button></div><small id="scan-alert-hint">Press Enter or click the button to continue</small></div>
       </section>
     </div>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>

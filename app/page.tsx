@@ -18,16 +18,20 @@ type Plot = {
   location: string; row: string; column: string; entryCode: string; block: string; obsName: string;
   gid: string; gerName: string; initialPlot: number; finalPlot: number;
 };
+type WeightVariable = "plotWeight" | "seedWeight";
 type WeightRecord = {
   key: string; sessionId: string; uuid: string; feid: string; entityName: string; obsName: string;
-  weight: number; weighedAt: string; updatedAt: string; source: string; lotSite?: string; lotLocation?: string; storage?: string;
+  weight: number; weightVariable: WeightVariable; weighedAt: string; updatedAt: string; source: string; lotSite?: string; lotLocation?: string; storage?: string;
 };
 type WeighingSession = {
-  id: string; name: string; sourceFileName: string; createdAt: string; updatedAt: string; version: number; plots: Plot[];
+  id: string; name: string; sourceFileName: string; createdAt: string; updatedAt: string; version: number; weightVariable: WeightVariable; plots: Plot[];
 };
-type ImportedWeight = { uuid: string; weight: number; weighedAt: string; source?: string; lotSite?: string; lotLocation?: string; storage?: string };
+type ImportedWeight = { uuid: string; weight: number; weightVariable: WeightVariable; weighedAt: string; source?: string; lotSite?: string; lotLocation?: string; storage?: string };
 type ImportResult = {
-  plots: Plot[]; importedWeights: ImportedWeight[]; invalidRows: number[]; invalidWeightRows: number[];
+  plots: Plot[]; importedWeights: ImportedWeight[]; invalidRows: number[];
+  invalidWeightRows: { row: number; weightVariable: WeightVariable; label: string }[];
+  weightConflicts: { row: number; weightVariable: WeightVariable; label: string; values: number[] }[];
+  weightValueCounts: Record<WeightVariable, number>; weightColumns: Record<WeightVariable, boolean>;
   fileName: string; sheetName: string;
 };
 type ProgressItem = {
@@ -41,13 +45,14 @@ type StoreApi = {
   init(): Promise<{ database: IDBDatabase; sessions: WeighingSession[]; activeSessionId: string | null }>;
   listSessions(database: IDBDatabase): Promise<WeighingSession[]>;
   getSession(database: IDBDatabase, id: string | null): Promise<WeighingSession | null>;
-  createSession(database: IDBDatabase, plots: Plot[], fileName: string, name?: string, initialWeights?: ImportedWeight[]): Promise<WeighingSession>;
+  createSession(database: IDBDatabase, plots: Plot[], fileName: string, name?: string, weightVariable?: WeightVariable, initialWeights?: ImportedWeight[]): Promise<WeighingSession>;
   getWeights(database: IDBDatabase, sessionId: string): Promise<WeightRecord[]>;
   saveWeight(database: IDBDatabase, sessionId: string, plot: Plot, weight: number, source?: string, weighedAt?: string, lot?: { lotSite: string; lotLocation: string; storage: string; keepForNext: boolean }): Promise<WeightRecord>;
   saveWeights(database: IDBDatabase, sessionId: string, entries: ImportedWeight[]): Promise<WeightRecord[]>;
   getLotContext(database: IDBDatabase, sessionId: string): Promise<{ keepForNext: boolean; hasValue: boolean; lotSite: string; lotLocation: string; storage: string }>;
   setLotContext(database: IDBDatabase, sessionId: string, context: { keepForNext: boolean; hasValue: boolean; lotSite: string; lotLocation: string; storage: string }): Promise<void>;
   renameSession(database: IDBDatabase, id: string, name: string): Promise<WeighingSession>;
+  setWeightVariable(database: IDBDatabase, id: string, weightVariable: WeightVariable): Promise<WeighingSession>;
   deleteSession(database: IDBDatabase, id: string): Promise<void>;
   setActiveSession(database: IDBDatabase, id: string | null): Promise<void>;
 };
@@ -58,6 +63,7 @@ type UtilsApi = {
   prepareMerge(plots: Plot[], current: WeightRecord[], imported: ImportedWeight[]): MergePlan;
   exportSession(session: WeighingSession, weights: WeightRecord[], format: "xlsx" | "csv", plots?: Plot[], decimalPlaces?: number): number;
   exportLots(session: WeighingSession, weights: WeightRecord[], format: "xlsx" | "csv", plots?: Plot[], decimalPlaces?: number): number;
+  weightLabel(sessionOrVariable: WeighingSession | WeightVariable): string;
 };
 type ImportApi = { parseExcelFile(file: File): Promise<ImportResult> };
 type SerialPortLike = {
@@ -77,6 +83,8 @@ declare global {
 const PAGE_SIZE = 100;
 const SCALE_EXPONENT_KEY = "gdm-warehouse-scale-exponent-v1";
 const DECIMAL_PLACES_KEY = "gdm-warehouse-decimal-places-v1";
+const WEIGHT_VARIABLE_LABELS: Record<WeightVariable, string> = { plotWeight: "Plot weight", seedWeight: "Seed weight" };
+function weightLabel(variable: WeightVariable | undefined) { return WEIGHT_VARIABLE_LABELS[variable === "seedWeight" ? "seedWeight" : "plotWeight"]; }
 
 function loadBrowserScript(src: string, id: string) {
   return new Promise<void>((resolve, reject) => {
@@ -205,6 +213,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
   const [scanMode, setScanMode] = useState<"feid" | "uuid">("feid");
+  const [weightVariable, setWeightVariable] = useState<WeightVariable>("plotWeight");
   const [scanValue, setScanValue] = useState("");
   const [scanError, setScanError] = useState("");
   const [scanAlert, setScanAlert] = useState<ScanAlert | null>(null);
@@ -341,6 +350,7 @@ export default function Home() {
   const safePage = Math.min(page, pageCount);
   const pageRows = filteredPlots.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
   const existingWeight = selected ? weightsByUuid.get(normalize(selected.uuid)) : undefined;
+  const currentWeightLabel = weightLabel(weightVariable);
 
   const applySession = useCallback(async (db: IDBDatabase, id: string | null) => {
     const store = window.GdmWeighingStore;
@@ -351,7 +361,7 @@ export default function Home() {
     const nextPlots = nextSession?.plots ?? [];
     exactPendingWeightRef.current = null; weightEditedRef.current = false;
     scanAlertRef.current = null;
-    setSession(nextSession); setPlots(nextPlots); setWeights(nextWeights); setSelected(null); setScanAlert(null);
+    setSession(nextSession); setPlots(nextPlots); setWeights(nextWeights); setWeightVariable(nextSession?.weightVariable || "plotWeight"); setSelected(null); setScanAlert(null);
     setKeepLotContext(lotContext.keepForNext); setHasLotContext(lotContext.hasValue);
     setCarriedLotSite(lotContext.lotSite); setCarriedLotLocation(lotContext.lotLocation); setCarriedStorage(lotContext.storage);
     setLotSite(""); setLotLocation(""); setLotStorage("");
@@ -386,20 +396,46 @@ export default function Home() {
     await applySession(database, id || null);
   }
 
+  async function changeWeightVariable(next: WeightVariable) {
+    if (weights.length) { toast.error("The weight variable cannot be changed after weights exist. Use Start New Weighing."); return; }
+    if (!session) { setWeightVariable(next); return; }
+    if (!database || !window.GdmWeighingStore) return;
+    try {
+      await window.GdmWeighingStore.setWeightVariable(database, session.id, next);
+      await applySession(database, session.id);
+      toast.success(`${weightLabel(next)} selected for this session.`);
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Could not change the weight variable."); }
+  }
+
   async function handleImport(event: ChangeEvent<HTMLInputElement>) {
     const [file] = Array.from(event.target.files ?? []); event.target.value = "";
     if (!file || !database || !window.GdmPlotImport || !window.GdmWeighingStore || !window.GdmWeighingUtils) return;
     setImporting(true);
     try {
       const result = await window.GdmPlotImport.parseExcelFile(file);
-      const invalid = result.invalidRows.length + result.invalidWeightRows.length;
-      if (!session || !result.importedWeights.length) {
-        const created = await window.GdmWeighingStore.createSession(database, result.plots, result.fileName, undefined, result.importedWeights);
+      const targetVariable = session?.weightVariable || weightVariable;
+      const targetLabel = weightLabel(targetVariable);
+      const otherVariable: WeightVariable = targetVariable === "plotWeight" ? "seedWeight" : "plotWeight";
+      const importedWeights = result.importedWeights.filter((item) => item.weightVariable === targetVariable);
+      const ignoredOtherWeights = result.importedWeights.filter((item) => item.weightVariable === otherVariable).length;
+      const relevantInvalid = result.invalidWeightRows.filter((item) => item.weightVariable === targetVariable).length;
+      const targetConflicts = result.weightConflicts.filter((item) => item.weightVariable === targetVariable);
+      const relevantConflicts = targetConflicts.length;
+      const invalid = result.invalidRows.length + relevantInvalid;
+      if (!importedWeights.length && !relevantInvalid && !relevantConflicts && ignoredOtherWeights > 0) {
+        throw new Error(`This file contains ${weightLabel(otherVariable)} values but the current session uses ${targetLabel}. Select the matching variable in an empty session or use Start New Weighing.`);
+      }
+      const importNotes = [
+        ignoredOtherWeights ? `${ignoredOtherWeights} ${weightLabel(otherVariable)} value(s) ignored` : "",
+        relevantConflicts ? `${relevantConflicts} conflicting ${targetLabel} row(s) skipped (${targetConflicts.slice(0, 5).map((item) => item.row).join(", ")}${relevantConflicts > 5 ? ", …" : ""})` : "",
+      ].filter(Boolean);
+      if (!session || !importedWeights.length) {
+        const created = await window.GdmWeighingStore.createSession(database, result.plots, result.fileName, undefined, targetVariable, importedWeights);
         await window.GdmWeighingStore.setActiveSession(database, created.id);
         await applySession(database, created.id);
-        toast.success(`Session created with ${result.plots.length} plots and ${result.importedWeights.length} weights${invalid ? `; ${invalid} invalid row(s) skipped` : ""}.`);
+        toast.success(`Session created for ${targetLabel} with ${result.plots.length} plots and ${importedWeights.length} existing weight${importedWeights.length === 1 ? "" : "s"}${invalid ? `; ${invalid} invalid row(s) skipped` : ""}${importNotes.length ? `; ${importNotes.join("; ")}` : ""}.`);
       } else {
-        const merge = window.GdmWeighingUtils.prepareMerge(plots, weights, result.importedWeights);
+        const merge = window.GdmWeighingUtils.prepareMerge(plots, weights, importedWeights);
         const overwrite = merge.unresolved.length
           ? window.confirm(`${merge.unresolved.length} conflicting weight(s) do not have comparable timestamps. Select OK to use the imported values, or Cancel to keep the current values.`)
           : false;
@@ -407,7 +443,7 @@ export default function Home() {
         await window.GdmWeighingStore.saveWeights(database, session.id, entries);
         await applySession(database, session.id);
         const kept = merge.keptCurrent + (overwrite ? 0 : merge.unresolved.length);
-        toast.success(`Partial results: ${entries.length} imported, ${kept} current kept, ${merge.unchanged} unchanged, ${merge.ignored} unmatched, ${invalid} invalid.`);
+        toast.success(`Partial ${targetLabel} results: ${entries.length} imported, ${kept} current kept, ${merge.unchanged} unchanged, ${merge.ignored} unmatched, ${invalid} invalid${importNotes.length ? `; ${importNotes.join("; ")}` : ""}.`);
       }
     } catch (error) { toast.error(error instanceof Error ? error.message : "Could not import the file."); }
     finally { setImporting(false); }
@@ -417,7 +453,7 @@ export default function Home() {
     if (!database || !window.GdmWeighingStore) return;
     if (!session) { fileRef.current?.click(); return; }
     try {
-      const created = await window.GdmWeighingStore.createSession(database, plots, session.sourceFileName);
+      const created = await window.GdmWeighingStore.createSession(database, plots, session.sourceFileName, undefined, "plotWeight");
       await window.GdmWeighingStore.setActiveSession(database, created.id);
       await applySession(database, created.id);
       toast.success(`New session “${created.name}” started.`);
@@ -480,8 +516,8 @@ export default function Home() {
     selectPlot(plot);
     if (record) openScanAlert({
       kind: "existing", title: "Plot already weighed",
-      message: `${plotDisplayName(plot)} already has PW ${formatNumber(record.weight, decimalPlaces)}. Choose whether to update it or keep the current value.`,
-      actionLabel: "Keep current PW",
+      message: `${plotDisplayName(plot)} already has ${currentWeightLabel} ${formatNumber(record.weight, decimalPlaces)}. Choose whether to update it or keep the current value.`,
+      actionLabel: `Keep current ${currentWeightLabel}`,
     });
   }
   async function saveCurrentWeight() {
@@ -501,7 +537,7 @@ export default function Home() {
       } else {
         setCarriedLotSite(""); setCarriedLotLocation(""); setCarriedStorage(""); setHasLotContext(false);
       }
-      toast.success(`PW ${formatNumber(value, decimalPlaces)} saved for plot ${selected.obsName}.`);
+      toast.success(`${currentWeightLabel} ${formatNumber(value, decimalPlaces)} saved for plot ${selected.obsName}.`);
       exactPendingWeightRef.current = null; weightEditedRef.current = false;
       setSelected(null); setScanValue(""); setWeightValue(""); setLotSite(""); setLotLocation(""); setLotStorage(""); window.setTimeout(() => scanRef.current?.focus(), 0);
     } catch (error) { toast.error(error instanceof Error ? error.message : "Could not save the weight."); }
@@ -608,7 +644,7 @@ export default function Home() {
   const paginationSummary = filteredPlots.length ? `${(safePage - 1) * PAGE_SIZE + 1}–${Math.min(safePage * PAGE_SIZE, filteredPlots.length)} of ${filteredPlots.length}` : "0–0 of 0";
   const tableColumns = [
     ["Status", "status"], ["Season year", "seasonYear"], ["Entity name", "entityName"], ["(OBS) Name", "obsName"], ["FEID", "feid"], ["UUID", "uuid"], ["Block", "block"],
-    ["Entry code", "entryCode"], ["Row", "row"], ["Column", "column"], ["(GER) Name", "gerName"], ["PW", "weight"], ["Weighed at", "weighedAt"],
+    ["Entry code", "entryCode"], ["Row", "row"], ["Column", "column"], ["(GER) Name", "gerName"], [currentWeightLabel, "weight"], ["Weighed at", "weighedAt"],
   ];
 
   return (
@@ -623,10 +659,10 @@ export default function Home() {
           <div className="px-6 py-6 text-center">
             <p id="scan-alert-message" className="text-lg font-semibold leading-relaxed text-[#284966]">{scanAlert.message}</p>
             <div className="mt-6 flex flex-col-reverse justify-center gap-3 sm:flex-row">
-              {scanAlert.kind === "existing" && <Button ref={scanAlertUpdateButtonRef} type="button" variant="outline" onClick={updateExistingWeight} className="h-13 min-w-44 rounded-md border-2 border-[#c98212] px-6 text-base font-black text-[#8a5708] hover:bg-[#fff4d6]">Update PW</Button>}
+              {scanAlert.kind === "existing" && <Button ref={scanAlertUpdateButtonRef} type="button" variant="outline" onClick={updateExistingWeight} className="h-13 min-w-44 rounded-md border-2 border-[#c98212] px-6 text-base font-black text-[#8a5708] hover:bg-[#fff4d6]">Update {currentWeightLabel}</Button>}
               <Button ref={scanAlertButtonRef} type="button" onClick={scanAlert.kind === "existing" ? keepExistingWeight : () => closeScanAlert()} className={`h-13 min-w-44 rounded-md px-6 text-base font-black text-white ${scanAlert.kind === "existing" ? "bg-[#c98212] hover:bg-[#ac6d0d]" : "bg-[#b42318] hover:bg-[#921f16]"}`}>{scanAlert.actionLabel}</Button>
             </div>
-            <p className="mt-3 text-xs font-bold uppercase tracking-[.08em] text-[#728398]">{scanAlert.kind === "existing" ? "Enter keeps the current PW · choose Update PW to replace it" : "Press Enter or click the button to continue"}</p>
+            <p className="mt-3 text-xs font-bold uppercase tracking-[.08em] text-[#728398]">{scanAlert.kind === "existing" ? `Enter keeps the current ${currentWeightLabel} · choose Update ${currentWeightLabel} to replace it` : "Press Enter or click the button to continue"}</p>
           </div>
         </section>
       </div>}
@@ -683,24 +719,25 @@ export default function Home() {
                 <label className="text-[11px] font-extrabold uppercase tracking-[.08em] text-[#587064]">Decimal places<NativeSelect value={String(decimalPlaces)} onChange={(event) => changeDecimalPlaces(event.target.value)} className="mt-1 h-10 w-full bg-white px-2 text-sm font-bold normal-case tracking-normal">{[0,1,2,3,4,5,6].map((value) => <NativeSelectOption key={value} value={String(value)}>{value}</NativeSelectOption>)}</NativeSelect></label>
                 <Button type="button" onClick={() => void toggleScale()} className={`h-10 rounded-[5px] font-extrabold sm:col-span-2 xl:col-span-1 ${scaleConnected ? "bg-[#d63b38]" : "bg-[#1f4269]"}`}>{scaleConnected ? "Disconnect" : "Connect scale"}</Button>
               </div>
-              <div className="border-t border-[#d5dfd0] pt-2 xl:border-l xl:border-t-0 xl:pl-4 xl:pt-0"><p className="text-[10px] font-bold uppercase tracking-[.08em] text-[#75867c]">Current reading</p><p className={`text-3xl font-black ${scaleWeight === null ? "text-[#173a61]" : "text-[#237a63]"}`} title={rawScaleWeight === null ? undefined : `Raw reading: ${formatRawNumber(rawScaleWeight)}`}>{scaleWeight === null ? "—" : formatNumber(scaleWeight, decimalPlaces)}</p><p className="mt-1 text-[10px] font-bold uppercase tracking-[.08em] text-[#75867c]">{scaleConnected ? `${selected ? "PW filled automatically" : "Scan a plot to apply"}${scaleExponent === "0" ? "" : ` · ${scaleFactorLabel(Number(scaleExponent))}`}` : "Waiting for connection"}</p></div>
+              <div className="border-t border-[#d5dfd0] pt-2 xl:border-l xl:border-t-0 xl:pl-4 xl:pt-0"><p className="text-[10px] font-bold uppercase tracking-[.08em] text-[#75867c]">Current reading</p><p className={`text-3xl font-black ${scaleWeight === null ? "text-[#173a61]" : "text-[#237a63]"}`} title={rawScaleWeight === null ? undefined : `Raw reading: ${formatRawNumber(rawScaleWeight)}`}>{scaleWeight === null ? "—" : formatNumber(scaleWeight, decimalPlaces)}</p><p className="mt-1 text-[10px] font-bold uppercase tracking-[.08em] text-[#75867c]">{scaleConnected ? `${selected ? `${currentWeightLabel} filled automatically` : "Scan a plot to apply"}${scaleExponent === "0" ? "" : ` · ${scaleFactorLabel(Number(scaleExponent))}`}` : "Waiting for connection"}</p></div>
             </section>
-            <p className="mt-2 text-xs text-[#647a90]">Connect the scale, select FEID or UUID, then scan a plot to fill PW automatically.</p>
+            <p className="mt-2 text-xs text-[#647a90]">Connect the scale, choose the weight variable and identifier, then scan a plot to fill {currentWeightLabel} automatically.</p>
 
-            <form onSubmit={handleScan} className="mt-4 grid gap-3 rounded-[5px] border border-[#cbdcec] bg-[#f8fbfe] p-3.5 sm:grid-cols-[190px_minmax(0,1fr)]">
+            <form onSubmit={handleScan} className="mt-4 grid gap-3 rounded-[5px] border border-[#cbdcec] bg-[#f8fbfe] p-3.5 md:grid-cols-[190px_190px_minmax(0,1fr)]">
+              <label><span className="mb-2 block text-sm font-bold text-[#365b80]">Weight variable</span><NativeSelect value={weightVariable} onChange={(event) => void changeWeightVariable(event.target.value as WeightVariable)} disabled={weights.length > 0} title={weights.length ? "Use Start New Weighing to change the variable after weights exist." : undefined} className="h-14 w-full rounded-[5px] border-2 border-[#d1dfed] bg-white px-4 font-bold"><NativeSelectOption value="plotWeight">Plot weight</NativeSelectOption><NativeSelectOption value="seedWeight">Seed weight</NativeSelectOption></NativeSelect></label>
               <label><span className="mb-2 block text-sm font-bold text-[#365b80]">Identifier</span><NativeSelect value={scanMode} onChange={(event) => { scanAlertRef.current = null; setScanMode(event.target.value as "feid" | "uuid"); setSelected(null); setScanAlert(null); setScanError(""); setScanValue(""); scanRef.current?.focus(); }} className="h-14 w-full rounded-[5px] border-2 border-[#d1dfed] bg-white px-4 font-bold"><NativeSelectOption value="feid">Plot FEID</NativeSelectOption><NativeSelectOption value="uuid">Plot UUID</NativeSelectOption></NativeSelect></label>
               <label><span className="mb-2 block text-sm font-bold text-[#365b80]">Scanned code</span><div className="relative"><Barcode className="absolute left-4 top-1/2 size-6 -translate-y-1/2 text-[#6e94b9]" /><Input ref={scanRef} autoFocus value={scanValue} onChange={(event) => setScanValue(event.target.value)} className="h-14 rounded-[5px] border-2 border-[#d1dfed] bg-white pl-13 font-mono text-lg font-semibold" placeholder={scanMode === "feid" ? "Scan or enter the FEID" : "Scan or enter the UUID"} autoComplete="off" spellCheck={false} /></div></label>
             </form>
-            <p className="mt-3 text-sm text-[#657b90]"><strong>Quick flow:</strong> scan to load a plot. When PW is filled, press Enter or scan the same plot again to save.</p>
+            <p className="mt-3 text-sm text-[#657b90]"><strong>Quick flow:</strong> scan to load a plot. When {currentWeightLabel} is filled, press Enter or scan the same plot again to save.</p>
             {scanError && <div role="alert" className="mt-4 flex items-center gap-3 rounded-lg border border-[#f2c8be] bg-[#fff4f1] px-4 py-3 text-[#963827]"><CircleAlert className="size-5" /><strong>{scanError}</strong></div>}
           </article>
 
           {selected && <article className="overflow-hidden rounded-lg border border-[#cbdcec] bg-white shadow-[0_10px_28px_rgba(26,59,93,0.08)]">
-            <div className="bg-[#1f4269] p-5 text-white sm:p-6"><div className="mb-5 flex justify-between gap-3"><span className="rounded-full bg-[#d9e9f6] px-3 py-1.5 text-sm font-black uppercase text-[#173f66]">✓ Plot found</span>{existingWeight && <span className="rounded-full bg-[#f5cf77] px-3 py-1.5 text-sm font-bold text-[#6a4700]">Already weighed: PW {formatNumber(existingWeight.weight, decimalPlaces)}</span>}</div><div className="grid gap-5 md:grid-cols-[1.45fr_.55fr]"><div><p className="text-xs font-bold uppercase tracking-[.14em] text-[#bbcee1]">Entity name</p><h2 className="text-3xl font-extrabold">{selected.entityName}</h2><p className="mt-5 text-xs font-bold uppercase tracking-[.14em] text-[#bbcee1]">(OBS) Name</p><p className="text-5xl font-black">{selected.obsName}</p></div><div className="rounded-md border border-white/20 bg-white/10 p-4"><p className="text-xs font-bold uppercase tracking-[.12em] text-[#bbcee1]">(GER) Name</p><p className="mt-2 text-xl font-extrabold">{selected.gerName || "—"}</p><p className="mt-4 flex items-center gap-2 text-sm text-[#c7d7e7]"><MapPin className="size-4" /> Location: {selected.location || "Unspecified"}</p><p className="mt-2 text-sm text-[#c7d7e7]">Trial site: {selected.site || "Unspecified"}</p></div></div></div>
+            <div className="bg-[#1f4269] p-5 text-white sm:p-6"><div className="mb-5 flex justify-between gap-3"><span className="rounded-full bg-[#d9e9f6] px-3 py-1.5 text-sm font-black uppercase text-[#173f66]">✓ Plot found</span>{existingWeight && <span className="rounded-full bg-[#f5cf77] px-3 py-1.5 text-sm font-bold text-[#6a4700]">Already weighed: {currentWeightLabel} {formatNumber(existingWeight.weight, decimalPlaces)}</span>}</div><div className="grid gap-5 md:grid-cols-[1.45fr_.55fr]"><div><p className="text-xs font-bold uppercase tracking-[.14em] text-[#bbcee1]">Entity name</p><h2 className="text-3xl font-extrabold">{selected.entityName}</h2><p className="mt-5 text-xs font-bold uppercase tracking-[.14em] text-[#bbcee1]">(OBS) Name</p><p className="text-5xl font-black">{selected.obsName}</p></div><div className="rounded-md border border-white/20 bg-white/10 p-4"><p className="text-xs font-bold uppercase tracking-[.12em] text-[#bbcee1]">(GER) Name</p><p className="mt-2 text-xl font-extrabold">{selected.gerName || "—"}</p><p className="mt-4 flex items-center gap-2 text-sm text-[#c7d7e7]"><MapPin className="size-4" /> Location: {selected.location || "Unspecified"}</p><p className="mt-2 text-sm text-[#c7d7e7]">Trial site: {selected.site || "Unspecified"}</p></div></div></div>
             <div className="grid gap-5 p-5 sm:p-6 xl:grid-cols-[minmax(0,1fr)_430px]">
               <dl className="self-start overflow-hidden rounded-md border border-[#cfdeeb] bg-[#f7fafe]"><div className="grid grid-cols-2 sm:grid-cols-5">{[["Season year",selected.seasonYear],["Block",selected.block],["Entry code",selected.entryCode],["Row",selected.row],["Column",selected.column]].map(([label,value]) => <div key={label} className="border-b border-r border-[#d8e4ee] px-3 py-2.5 last:border-r-0 sm:border-b-0"><dt className="text-[10px] font-bold uppercase tracking-[.08em] text-[#6d8195]">{label}</dt><dd className="mt-0.5 text-xl font-black leading-tight">{value || "—"}</dd></div>)}</div><div className="px-3 py-2.5"><dt className="text-[10px] font-bold uppercase tracking-[.08em] text-[#6d8195]">Identifiers</dt><dd className="mt-1 grid gap-x-4 gap-y-1 text-xs sm:grid-cols-[minmax(120px,.45fr)_1fr]"><span><strong>FEID:</strong> {selected.feid}</span><span className="break-all"><strong>UUID:</strong> {selected.uuid}</span></dd></div></dl>
               <form onSubmit={(event) => { event.preventDefault(); void saveCurrentWeight(); }} className="rounded-md border border-[#cbdcec] bg-[#eaf2f9] p-4 sm:p-5">
-                <label htmlFor="plot-weight" className="flex items-center gap-2 text-sm font-bold uppercase tracking-[.1em]"><Scale className="size-4" /> Plot weight (PW)</label>
+                <label htmlFor="plot-weight" className="flex items-center gap-2 text-sm font-bold uppercase tracking-[.1em]"><Scale className="size-4" /> {currentWeightLabel}</label>
                 <Input id="plot-weight" ref={weightRef} inputMode="decimal" value={weightValue} onChange={(event) => { weightEditedRef.current = true; exactPendingWeightRef.current = null; setWeightValue(event.target.value); }} className="mt-3 h-16 border-2 bg-white px-4 text-3xl font-black" placeholder={formatInputNumber(0, decimalPlaces)} />
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   <label className="text-xs font-bold uppercase tracking-[.08em] text-[#526f89]">Lot site<Input value={lotSite} onChange={(event) => setLotSite(event.target.value)} className="mt-1 h-10 bg-white text-sm font-semibold normal-case tracking-normal" placeholder="Lot site" /></label>
@@ -708,12 +745,12 @@ export default function Home() {
                   <label className="text-xs font-bold uppercase tracking-[.08em] text-[#526f89] sm:col-span-2">Storage<Input value={lotStorage} onChange={(event) => setLotStorage(event.target.value)} className="mt-1 h-10 bg-white text-sm font-semibold normal-case tracking-normal" placeholder="Storage" /></label>
                 </div>
                 <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs font-bold text-[#365b80]"><input type="checkbox" checked={keepLotContext} onChange={(event) => void changeKeepLotContext(event.target.checked)} className="mt-0.5 accent-[#1f4269]" /><span>Keep Lot site, Lot location and Storage for next plot</span></label>
-                <Button type="submit" disabled={saving} className="mt-3 h-12 w-full rounded-[5px] bg-[#1f4269] text-base font-black">{saving ? <LoaderCircle className="animate-spin" /> : <Check />} {existingWeight ? "Update PW" : "Save PW"}</Button>
+                <Button type="submit" disabled={saving} className="mt-3 h-12 w-full rounded-[5px] bg-[#1f4269] text-base font-black">{saving ? <LoaderCircle className="animate-spin" /> : <Check />} {existingWeight ? `Update ${currentWeightLabel}` : `Save ${currentWeightLabel}`}</Button>
               </form>
             </div>
           </article>}
 
-          <section className="rounded-lg border border-[#cbdcec] bg-white p-5 shadow-[0_10px_28px_rgba(26,59,93,0.08)] sm:p-6"><div className="flex items-center justify-between border-b-2 border-[#d6e3ef] pb-3"><div><p className="text-sm font-bold uppercase tracking-[.1em] text-[#315b86]">◷ Recent history</p><h2 className="text-2xl font-extrabold">Latest weighings</h2></div><span className="rounded bg-[#eaf3fb] px-2.5 py-1 text-xs font-bold">10 most recent</span></div>{recent.length ? <div className="divide-y divide-[#dbe6f0]">{recent.map((record) => <article key={record.key} className="grid items-center gap-3 py-3.5 sm:grid-cols-[1fr_auto_auto]"><div><p className="text-lg font-extrabold">Plot {record.obsName || "—"}</p><p className="text-xs text-[#657b90]">{record.entityName || "Unnamed trial"} · FEID {record.feid || "—"}</p></div><div className="sm:text-right"><small className="font-bold">PW</small><p className="text-xl font-black">{formatNumber(record.weight, decimalPlaces)}</p></div><time className="text-xs text-[#657b90]">{formatDateTime(record.weighedAt || record.updatedAt)}</time></article>)}</div> : <div className="grid min-h-48 place-content-center justify-items-center text-center"><Scale className="size-12 rounded-lg bg-[#dceaf6] p-3" /><strong className="mt-3">No weighings recorded</strong><p className="text-sm text-[#647a90]">Saved weighings will appear here automatically.</p></div>}</section>
+          <section className="rounded-lg border border-[#cbdcec] bg-white p-5 shadow-[0_10px_28px_rgba(26,59,93,0.08)] sm:p-6"><div className="flex items-center justify-between border-b-2 border-[#d6e3ef] pb-3"><div><p className="text-sm font-bold uppercase tracking-[.1em] text-[#315b86]">◷ Recent history</p><h2 className="text-2xl font-extrabold">Latest weighings</h2></div><span className="rounded bg-[#eaf3fb] px-2.5 py-1 text-xs font-bold">10 most recent</span></div>{recent.length ? <div className="divide-y divide-[#dbe6f0]">{recent.map((record) => <article key={record.key} className="grid items-center gap-3 py-3.5 sm:grid-cols-[1fr_auto_auto]"><div><p className="text-lg font-extrabold">Plot {record.obsName || "—"}</p><p className="text-xs text-[#657b90]">{record.entityName || "Unnamed trial"} · FEID {record.feid || "—"}</p></div><div className="sm:text-right"><small className="font-bold">{currentWeightLabel}</small><p className="text-xl font-black">{formatNumber(record.weight, decimalPlaces)}</p></div><time className="text-xs text-[#657b90]">{formatDateTime(record.weighedAt || record.updatedAt)}</time></article>)}</div> : <div className="grid min-h-48 place-content-center justify-items-center text-center"><Scale className="size-12 rounded-lg bg-[#dceaf6] p-3" /><strong className="mt-3">No weighings recorded</strong><p className="text-sm text-[#647a90]">Saved weighings will appear here automatically.</p></div>}</section>
         </section>
       ) : (
         <section className="mx-auto max-w-[1500px] space-y-5 px-[18px] pt-5">

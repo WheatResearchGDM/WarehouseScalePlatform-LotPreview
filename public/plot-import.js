@@ -18,7 +18,6 @@
     ["gerName", "(GER) Name", ["(GER) Nombre", "(GER) Nome"]],
     ["initialPlot", "Initial plot", ["Parcela inicial"]],
     ["finalPlot", "Final plot", ["Parcela final"]],
-    ["pw", "PW", []],
   ];
   const optionalFields = [
     ["site", "Site", ["Sitio", "Unidade"]],
@@ -47,6 +46,23 @@
     const parsed = new Date(text);
     return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString();
   }
+  const weightDefinitions = {
+    plotWeight: { label: "Plot weight", aliases: ["Plot weight", "PW"] },
+    seedWeight: { label: "Seed weight", aliases: ["Seed weight", "SEED.W"] },
+  };
+  function columnIndexes(headers, aliases) {
+    const normalized = new Set(aliases.map(normalizeHeader));
+    return headers.reduce((indexes, header, index) => normalized.has(header) ? [...indexes, index] : indexes, []);
+  }
+  function readWeight(row, indexes, definition, rowNumber) {
+    const populated = indexes.map((index) => ({ index, text: cellText(row[index]), value: numericCell(row[index]) })).filter((item) => item.text);
+    if (!populated.length) return { status: "blank" };
+    const invalid = populated.filter((item) => !Number.isFinite(item.value) || item.value < 0);
+    if (invalid.length) return { status: "invalid", row: rowNumber, weightVariable: definition };
+    const distinct = [...new Set(populated.map((item) => item.value))];
+    if (distinct.length > 1) return { status: "conflict", row: rowNumber, weightVariable: definition, values: distinct };
+    return { status: "valid", value: distinct[0] };
+  }
 
   async function parseExcelFile(file) {
     if (!global.XLSX) throw new Error("The spreadsheet reader is unavailable. Refresh the page and try again.");
@@ -73,10 +89,13 @@
       ...fields.map((field) => [field[0], headerAliases(field).map((alias) => headers.indexOf(alias)).find((index) => index >= 0) ?? -1]),
       ...optionalFields.map((field) => [field[0], headerAliases(field).map((alias) => headers.indexOf(alias)).find((index) => index >= 0) ?? -1]),
     ]);
+    const weightIndexes = Object.fromEntries(Object.entries(weightDefinitions).map(([key, definition]) => [key, columnIndexes(headers, definition.aliases)]));
     const plots = [];
     const importedWeights = [];
     const invalidRows = [];
     const invalidWeightRows = [];
+    const weightConflicts = [];
+    const weightValueCounts = { plotWeight: 0, seedWeight: 0 };
     const feids = new Set();
     const uuids = new Set();
     for (let index = headerRowIndex + 1; index < rows.length; index += 1) {
@@ -99,17 +118,19 @@
       feids.add(plot.feid.toUpperCase());
       uuids.add(plot.uuid);
       plots.push(plot);
-      const pwText = cellText(row[indexes.pw]);
-      if (pwText) {
-        const weight = numericCell(row[indexes.pw]);
-        if (Number.isFinite(weight) && weight >= 0) {
+      for (const [weightVariable, definition] of Object.entries(weightDefinitions)) {
+        const parsedWeight = readWeight(row, weightIndexes[weightVariable], weightVariable, index + 1);
+        if (parsedWeight.status === "valid") {
+          weightValueCounts[weightVariable] += 1;
           importedWeights.push({
-            uuid: plot.uuid, weight, lotSite: indexes.lotSite >= 0 ? cellText(row[indexes.lotSite]) : "",
+            uuid: plot.uuid, weight: parsedWeight.value, weightVariable,
+            lotSite: indexes.lotSite >= 0 ? cellText(row[indexes.lotSite]) : "",
             lotLocation: indexes.lotLocation >= 0 ? cellText(row[indexes.lotLocation]) : "",
             storage: indexes.storage >= 0 ? cellText(row[indexes.storage]) : "",
             weighedAt: indexes.weighedAt >= 0 ? validDateText(row[indexes.weighedAt]) : "",
           });
-        } else invalidWeightRows.push(index + 1);
+        } else if (parsedWeight.status === "invalid") invalidWeightRows.push({ row: index + 1, weightVariable, label: definition.label });
+        else if (parsedWeight.status === "conflict") weightConflicts.push({ row: index + 1, weightVariable, label: definition.label, values: parsedWeight.values });
       }
     }
     if (!plots.length) {
@@ -118,7 +139,9 @@
     }
     const firstDataRow = rows[headerRowIndex + 1] || [];
     return {
-      plots, importedWeights, invalidRows, invalidWeightRows, fileName: file.name, sheetName,
+      plots, importedWeights, invalidRows, invalidWeightRows, weightConflicts, weightValueCounts,
+      weightColumns: Object.fromEntries(Object.entries(weightIndexes).map(([key, value]) => [key, value.length > 0])),
+      fileName: file.name, sheetName,
       metadata: {
         sessionId: indexes.sessionId >= 0 ? cellText(firstDataRow[indexes.sessionId]) : "",
         sessionName: indexes.sessionName >= 0 ? cellText(firstDataRow[indexes.sessionName]) : "",
@@ -130,6 +153,7 @@
   global.GdmPlotImport = {
     parseExcelFile,
     requiredHeaders: fields.map(([, label]) => label),
-    exportHeaders: [...fields.map(([, label]) => label), ...optionalFields.map(([, label]) => label)],
+    weightDefinitions,
+    exportHeaders: [...fields.map(([, label]) => label), ...Object.values(weightDefinitions).map(({ label }) => label), ...optionalFields.map(([, label]) => label)],
   };
 })(window);
