@@ -16,7 +16,7 @@ import { Toaster } from "@/components/ui/sonner";
 type Plot = {
   id: string; feid: string; uuid: string; seasonYear: string; entityName: string; trialType: string; site: string;
   location: string; row: string; column: string; entryCode: string; block: string; obsName: string;
-  gid: string; gerName: string; initialPlot: number; finalPlot: number;
+  gid: string; gerName: string; initialPlot?: number; finalPlot?: number;
 };
 type WeightVariable = "plotWeight" | "seedWeight";
 type WeightRecord = {

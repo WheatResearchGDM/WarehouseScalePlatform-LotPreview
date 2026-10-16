@@ -19,6 +19,8 @@
     ["initialPlot", "Initial plot", ["Parcela inicial"]],
     ["finalPlot", "Final plot", ["Parcela final"]],
   ];
+  const optionalPlotFields = new Set(["initialPlot", "finalPlot"]);
+  const requiredFields = fields.filter(([key]) => !optionalPlotFields.has(key));
   const optionalFields = [
     ["site", "Site", ["Sitio", "Unidade"]],
     ["lotSite", "Lot site", []],
@@ -39,6 +41,10 @@
     if (!text) return NaN;
     const parsed = typeof value === "number" ? value : Number(text.replace(/,/g, "."));
     return Number.isFinite(parsed) ? parsed : NaN;
+  }
+  function optionalNumericCell(value) {
+    const parsed = numericCell(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
   }
   function validDateText(value) {
     const text = cellText(value);
@@ -73,14 +79,14 @@
     const rows = global.XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "", raw: true });
     if (!rows.length) throw new Error("The first sheet is empty.");
 
-    const requiredNames = fields.map(headerAliases);
+    const requiredNames = requiredFields.map(headerAliases);
     const headerRowIndex = rows.findIndex((row) => {
       const values = new Set(row.map(normalizeHeader));
       return requiredNames.every((aliases) => aliases.some((name) => values.has(name)));
     });
     if (headerRowIndex < 0) {
       const available = new Set(rows.slice(0, 20).flat().map(normalizeHeader));
-      const missing = fields.filter((field) => !headerAliases(field).some((alias) => available.has(alias))).map(([, label]) => label);
+      const missing = requiredFields.filter((field) => !headerAliases(field).some((alias) => available.has(alias))).map(([, label]) => label);
       throw new Error(`Missing headers: ${missing.join(", ")}.`);
     }
 
@@ -107,13 +113,13 @@
         entityName: cellText(row[indexes.entityName]), trialType: cellText(row[indexes.trialType]), site: indexes.site >= 0 ? cellText(row[indexes.site]) : "",
         location: cellText(row[indexes.location]), row: cellText(row[indexes.row]), column: cellText(row[indexes.column]),
         entryCode: cellText(row[indexes.entryCode]), block: cellText(row[indexes.block]), obsName: cellText(row[indexes.obsName]),
-        gid: cellText(row[indexes.gid]), gerName: cellText(row[indexes.gerName]), initialPlot: numericCell(row[indexes.initialPlot]),
-        finalPlot: numericCell(row[indexes.finalPlot]),
+        gid: cellText(row[indexes.gid]), gerName: cellText(row[indexes.gerName]),
+        initialPlot: indexes.initialPlot >= 0 ? optionalNumericCell(row[indexes.initialPlot]) : undefined,
+        finalPlot: indexes.finalPlot >= 0 ? optionalNumericCell(row[indexes.finalPlot]) : undefined,
       };
       const invalid = !plot.feid || !plot.uuid || !plot.entityName || !plot.obsName
         || !plot.seasonYear
-        || !Number.isFinite(plot.initialPlot) || !Number.isFinite(plot.finalPlot)
-        || plot.finalPlot < plot.initialPlot || feids.has(plot.feid.toUpperCase()) || uuids.has(plot.uuid);
+        || feids.has(plot.feid.toUpperCase()) || uuids.has(plot.uuid);
       if (invalid) { invalidRows.push(index + 1); continue; }
       feids.add(plot.feid.toUpperCase());
       uuids.add(plot.uuid);
@@ -152,7 +158,7 @@
 
   global.GdmPlotImport = {
     parseExcelFile,
-    requiredHeaders: fields.map(([, label]) => label),
+    requiredHeaders: requiredFields.map(([, label]) => label),
     weightDefinitions,
     exportHeaders: [...fields.map(([, label]) => label), ...Object.values(weightDefinitions).map(({ label }) => label), ...optionalFields.map(([, label]) => label)],
   };

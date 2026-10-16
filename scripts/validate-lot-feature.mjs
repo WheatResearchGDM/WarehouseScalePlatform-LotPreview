@@ -97,6 +97,10 @@ await loadBrowserScript("public/plot-import.js");
 const requiredHeaders = globalThis.GdmPlotImport.requiredHeaders;
 assert.equal(requiredHeaders.includes("PW"), false);
 assert.equal(requiredHeaders.includes("Plot weight"), false);
+assert.equal(requiredHeaders.includes("Initial plot"), false);
+assert.equal(requiredHeaders.includes("Final plot"), false);
+assert.equal(globalThis.GdmPlotImport.exportHeaders.includes("Initial plot"), true);
+assert.equal(globalThis.GdmPlotImport.exportHeaders.includes("Final plot"), true);
 
 const baseValues = {
   ID: "1", FEID: "10", UUID: "A", "Season year": "2026", "Entity name": "Trial A", "Trial type": "EYT",
@@ -117,6 +121,30 @@ const parse = async (extraHeaders = [], overrides = {}) => {
 const noWeights = await parse();
 assert.equal(noWeights.importedWeights.length, 0);
 assert.equal(noWeights.plots.length, 1);
+assert.equal(noWeights.plots[0].initialPlot, undefined);
+assert.equal(noWeights.plots[0].finalPlot, undefined);
+
+const blankPlotRange = await parse(["Initial plot", "Final plot"], { "Initial plot": "", "Final plot": "" });
+assert.equal(blankPlotRange.plots.length, 1);
+assert.equal(blankPlotRange.plots[0].initialPlot, undefined);
+assert.equal(blankPlotRange.plots[0].finalPlot, undefined);
+
+const partialPlotRange = await parse(["Initial plot"], { "Initial plot": 42 });
+assert.equal(partialPlotRange.plots.length, 1);
+assert.equal(partialPlotRange.plots[0].initialPlot, 42);
+assert.equal(partialPlotRange.plots[0].finalPlot, undefined);
+
+const reversedPlotRange = await parse(["Initial plot", "Final plot"], { "Initial plot": 100, "Final plot": 1 });
+assert.equal(reversedPlotRange.plots.length, 1);
+assert.equal(reversedPlotRange.plots[0].initialPlot, 100);
+assert.equal(reversedPlotRange.plots[0].finalPlot, 1);
+
+const plotWithoutRange = { ...plots[0] };
+delete plotWithoutRange.initialPlot;
+delete plotWithoutRange.finalPlot;
+const exportedWithoutRange = globalThis.GdmWeighingUtils.exportRows(session, weights, [plotWithoutRange])[0];
+assert.equal(exportedWithoutRange["Initial plot"], "");
+assert.equal(exportedWithoutRange["Final plot"], "");
 
 for (const [header, variable] of [["Plot weight", "plotWeight"], ["PW", "plotWeight"], ["Seed weight", "seedWeight"], ["SEED.W", "seedWeight"]]) {
   const imported = await parse([header], { [header]: 0 });
