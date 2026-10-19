@@ -194,6 +194,8 @@ assert.ok(lotFields.indexOf("Storage") < lotFields.indexOf("Lot location"));
 assert.ok(lotFields.indexOf("Lot location") < lotFields.indexOf("First order"));
 assert.ok(lotFields.indexOf("First order") < lotFields.indexOf("Second order"));
 assert.ok(staticHtml.indexOf('class="weight-form"') < staticHtml.indexOf("Lot details"));
+assert.equal(staticHtml.includes("Identifiers"), false);
+assert.ok(staticHtml.indexOf('class="hero-details"') < staticHtml.indexOf('id="weight-form"'));
 assert.ok(staticHtml.includes("Keep Lot site, Lot location, Storage, First order and Second order for next plot"));
 
 console.log("Weight variable and lot feature validation passed.");

@@ -293,7 +293,7 @@
     refs.scanError.hidden = true; refs.plotCard.hidden = false; refs.scanValue.value = "";
     text("entity-name", plot.entityName); text("obs-name", plot.obsName); text("ger-name", plot.gerName || "—");
     text("location", `⌖ Location: ${plot.location || "Unspecified"} · Trial site: ${plot.site || "Unspecified"}`);
-    text("season-year", plot.seasonYear || "—"); text("block", plot.block || "—"); text("entry-code", plot.entryCode || "—"); text("row", plot.row || "—"); text("column", plot.column || "—"); text("feid", plot.feid); text("uuid", plot.uuid);
+    text("season-year", plot.seasonYear || "—"); text("block", plot.block || "—"); text("entry-code", plot.entryCode || "—"); text("row", plot.row || "—"); text("column", plot.column || "—");
     const existing = weightsMap().get(normalize(plot.uuid));
     state.exactPendingWeight = existing ? Number(existing.weight) : null;
     state.weightEdited = false;
