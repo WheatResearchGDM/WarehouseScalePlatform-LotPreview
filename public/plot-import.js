@@ -26,6 +26,8 @@
     ["lotSite", "Lot site", []],
     ["lotLocation", "Lot location", []],
     ["storage", "Storage", []],
+    ["firstOrder", "First order", []],
+    ["secondOrder", "Second order", []],
     ["weighingStatus", "Weighing status", []], ["weighedAt", "Weighed at", []],
     ["sessionId", "Session ID", []], ["sessionName", "Session name", []], ["exportedAt", "Exported at", []],
   ];
@@ -133,6 +135,8 @@
             lotSite: indexes.lotSite >= 0 ? cellText(row[indexes.lotSite]) : "",
             lotLocation: indexes.lotLocation >= 0 ? cellText(row[indexes.lotLocation]) : "",
             storage: indexes.storage >= 0 ? cellText(row[indexes.storage]) : "",
+            firstOrder: indexes.firstOrder >= 0 ? cellText(row[indexes.firstOrder]) : "",
+            secondOrder: indexes.secondOrder >= 0 ? cellText(row[indexes.secondOrder]) : "",
             weighedAt: indexes.weighedAt >= 0 ? validDateText(row[indexes.weighedAt]) : "",
           });
         } else if (parsedWeight.status === "invalid") invalidWeightRows.push({ row: index + 1, weightVariable, label: definition.label });

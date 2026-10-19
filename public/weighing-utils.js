@@ -82,16 +82,20 @@
       uuid: existing.uuid, weight: Number(existing.weight), weighedAt: existing.weighedAt || existing.updatedAt || "",
       weightVariable: weightVariable(existing.weightVariable || incoming.weightVariable),
       lotSite: existing.lotSite || incoming.lotSite || "", lotLocation: existing.lotLocation || incoming.lotLocation || "",
-      storage: existing.storage || incoming.storage || "", source: existing.source || "import",
+      storage: existing.storage || incoming.storage || "", firstOrder: existing.firstOrder || incoming.firstOrder || "",
+      secondOrder: existing.secondOrder || incoming.secondOrder || "", source: existing.source || "import",
     });
     const withPreservedMetadata = (existing, incoming) => ({
       ...incoming,
       lotSite: incoming.lotSite || existing.lotSite || "",
       lotLocation: incoming.lotLocation || existing.lotLocation || "",
       storage: incoming.storage || existing.storage || "",
+      firstOrder: incoming.firstOrder || existing.firstOrder || "",
+      secondOrder: incoming.secondOrder || existing.secondOrder || "",
     });
     const hasMetadataToFill = (existing, incoming) => (!existing.lotSite && incoming.lotSite)
-      || (!existing.lotLocation && incoming.lotLocation) || (!existing.storage && incoming.storage);
+      || (!existing.lotLocation && incoming.lotLocation) || (!existing.storage && incoming.storage)
+      || (!existing.firstOrder && incoming.firstOrder) || (!existing.secondOrder && incoming.secondOrder);
     for (const incoming of importedWeights || []) {
       const key = normalize(incoming.uuid);
       if (!plots.has(key)) { ignored += 1; continue; }
@@ -214,8 +218,10 @@
       for (const [label, field] of sourceColumns) row[label] = plot[field] ?? "";
       row["Lot site"] = record.lotSite ?? "";
       row["Lot location"] = record.lotLocation ?? "";
-      row[weightColumnLabel] = Number(record.weight);
       row.Storage = record.storage ?? "";
+      row["First order"] = record.firstOrder ?? "";
+      row["Second order"] = record.secondOrder ?? "";
+      row[weightColumnLabel] = Number(record.weight);
       row["Weighing status"] = "Weighed";
       row["Weighed at"] = record.weighedAt || record.updatedAt || "";
       row["Session ID"] = session.id;

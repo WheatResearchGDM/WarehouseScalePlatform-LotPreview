@@ -84,7 +84,7 @@
         key: `${session.id}::${normalize(plot.uuid)}`, sessionId: session.id, uuid: plot.uuid, feid: plot.feid,
         entityName: plot.entityName, obsName: plot.obsName, weight: Number(item.weight), weighedAt: timestamp,
         updatedAt: timestamp, source: item.source || "import", weightVariable: selectedVariable, lotSite: item.lotSite ?? "",
-        lotLocation: item.lotLocation ?? "", storage: item.storage ?? "",
+        lotLocation: item.lotLocation ?? "", storage: item.storage ?? "", firstOrder: item.firstOrder ?? "", secondOrder: item.secondOrder ?? "",
       });
     }
     tx.objectStore("settings").put({ key: ACTIVE_SESSION_KEY, value: session.id });
@@ -111,6 +111,7 @@
       entityName: plot.entityName, obsName: plot.obsName, weight: numericWeight, weighedAt: iso,
       updatedAt: iso, source, weightVariable, lotSite: String(lot.lotSite ?? "").trim(),
       lotLocation: String(lot.lotLocation ?? "").trim(), storage: String(lot.storage ?? "").trim(),
+      firstOrder: String(lot.firstOrder ?? "").trim(), secondOrder: String(lot.secondOrder ?? "").trim(),
     };
     tx.objectStore("weights").put(record);
     session.updatedAt = new Date().toISOString();
@@ -119,8 +120,8 @@
       tx.objectStore("settings").put({
         key: lotContextKey(sessionId),
         value: lot.keepForNext
-          ? { keepForNext: true, hasValue: true, lotSite: record.lotSite, lotLocation: record.lotLocation, storage: record.storage }
-          : { keepForNext: false, hasValue: false, lotSite: "", lotLocation: "", storage: "" },
+          ? { keepForNext: true, hasValue: true, lotSite: record.lotSite, lotLocation: record.lotLocation, storage: record.storage, firstOrder: record.firstOrder, secondOrder: record.secondOrder }
+          : { keepForNext: false, hasValue: false, lotSite: "", lotLocation: "", storage: "", firstOrder: "", secondOrder: "" },
       });
     }
     await transactionDone(tx);
@@ -145,7 +146,7 @@
         key: `${sessionId}::${normalize(plot.uuid)}`, sessionId, uuid: plot.uuid, feid: plot.feid,
         entityName: plot.entityName, obsName: plot.obsName, weight: Number(entry.weight), weighedAt: iso,
         updatedAt: iso, source: entry.source || "import", weightVariable, lotSite: entry.lotSite ?? "",
-        lotLocation: entry.lotLocation ?? "", storage: entry.storage ?? "",
+        lotLocation: entry.lotLocation ?? "", storage: entry.storage ?? "", firstOrder: entry.firstOrder ?? "", secondOrder: entry.secondOrder ?? "",
       };
       store.put(record);
       records.push(record);
@@ -225,7 +226,7 @@
         keepForNext: value.keepForNext !== false,
         hasValue: value.keepForNext !== false && Boolean(storage),
         lotSite: "", lotLocation: "",
-        storage,
+        storage, firstOrder: "", secondOrder: "",
       };
       settingsStore.put(setting);
     }
@@ -271,14 +272,15 @@
     async getLotContext(database, sessionId) {
       const value = await getSetting(database, lotContextKey(sessionId));
       return value && typeof value === "object"
-        ? { keepForNext: value.keepForNext !== false, hasValue: value.hasValue === true, lotSite: String(value.lotSite || ""), lotLocation: String(value.lotLocation || ""), storage: String(value.storage || "") }
-        : { keepForNext: true, hasValue: false, lotSite: "", lotLocation: "", storage: "" };
+        ? { keepForNext: value.keepForNext !== false, hasValue: value.hasValue === true, lotSite: String(value.lotSite || ""), lotLocation: String(value.lotLocation || ""), storage: String(value.storage || ""), firstOrder: String(value.firstOrder || ""), secondOrder: String(value.secondOrder || "") }
+        : { keepForNext: true, hasValue: false, lotSite: "", lotLocation: "", storage: "", firstOrder: "", secondOrder: "" };
     },
     setLotContext(database, sessionId, context) {
       return setSetting(database, lotContextKey(sessionId), {
         keepForNext: context?.keepForNext !== false,
         hasValue: context?.hasValue === true,
         lotSite: String(context?.lotSite || ""), lotLocation: String(context?.lotLocation || ""), storage: String(context?.storage || ""),
+        firstOrder: String(context?.firstOrder || ""), secondOrder: String(context?.secondOrder || ""),
       });
     },
     setActiveSession(database, id) { return setSetting(database, ACTIVE_SESSION_KEY, id); },

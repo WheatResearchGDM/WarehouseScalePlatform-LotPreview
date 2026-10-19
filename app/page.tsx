@@ -21,12 +21,12 @@ type Plot = {
 type WeightVariable = "plotWeight" | "seedWeight";
 type WeightRecord = {
   key: string; sessionId: string; uuid: string; feid: string; entityName: string; obsName: string;
-  weight: number; weightVariable: WeightVariable; weighedAt: string; updatedAt: string; source: string; lotSite?: string; lotLocation?: string; storage?: string;
+  weight: number; weightVariable: WeightVariable; weighedAt: string; updatedAt: string; source: string; lotSite?: string; lotLocation?: string; storage?: string; firstOrder?: string; secondOrder?: string;
 };
 type WeighingSession = {
   id: string; name: string; sourceFileName: string; createdAt: string; updatedAt: string; version: number; weightVariable: WeightVariable; plots: Plot[];
 };
-type ImportedWeight = { uuid: string; weight: number; weightVariable: WeightVariable; weighedAt: string; source?: string; lotSite?: string; lotLocation?: string; storage?: string };
+type ImportedWeight = { uuid: string; weight: number; weightVariable: WeightVariable; weighedAt: string; source?: string; lotSite?: string; lotLocation?: string; storage?: string; firstOrder?: string; secondOrder?: string };
 type ImportResult = {
   plots: Plot[]; importedWeights: ImportedWeight[]; invalidRows: number[];
   invalidWeightRows: { row: number; weightVariable: WeightVariable; label: string }[];
@@ -48,10 +48,10 @@ type StoreApi = {
   getSession(database: IDBDatabase, id: string | null): Promise<WeighingSession | null>;
   createSession(database: IDBDatabase, plots: Plot[], fileName: string, name?: string, weightVariable?: WeightVariable, initialWeights?: ImportedWeight[]): Promise<WeighingSession>;
   getWeights(database: IDBDatabase, sessionId: string): Promise<WeightRecord[]>;
-  saveWeight(database: IDBDatabase, sessionId: string, plot: Plot, weight: number, source?: string, weighedAt?: string, lot?: { lotSite: string; lotLocation: string; storage: string; keepForNext: boolean }): Promise<WeightRecord>;
+  saveWeight(database: IDBDatabase, sessionId: string, plot: Plot, weight: number, source?: string, weighedAt?: string, lot?: { lotSite: string; lotLocation: string; storage: string; firstOrder: string; secondOrder: string; keepForNext: boolean }): Promise<WeightRecord>;
   saveWeights(database: IDBDatabase, sessionId: string, entries: ImportedWeight[]): Promise<WeightRecord[]>;
-  getLotContext(database: IDBDatabase, sessionId: string): Promise<{ keepForNext: boolean; hasValue: boolean; lotSite: string; lotLocation: string; storage: string }>;
-  setLotContext(database: IDBDatabase, sessionId: string, context: { keepForNext: boolean; hasValue: boolean; lotSite: string; lotLocation: string; storage: string }): Promise<void>;
+  getLotContext(database: IDBDatabase, sessionId: string): Promise<{ keepForNext: boolean; hasValue: boolean; lotSite: string; lotLocation: string; storage: string; firstOrder: string; secondOrder: string }>;
+  setLotContext(database: IDBDatabase, sessionId: string, context: { keepForNext: boolean; hasValue: boolean; lotSite: string; lotLocation: string; storage: string; firstOrder: string; secondOrder: string }): Promise<void>;
   renameSession(database: IDBDatabase, id: string, name: string): Promise<WeighingSession>;
   setWeightVariable(database: IDBDatabase, id: string, weightVariable: WeightVariable): Promise<WeighingSession>;
   deleteSession(database: IDBDatabase, id: string): Promise<void>;
@@ -225,9 +225,13 @@ export default function Home() {
   const [lotSite, setLotSite] = useState("");
   const [lotLocation, setLotLocation] = useState("");
   const [lotStorage, setLotStorage] = useState("");
+  const [firstOrder, setFirstOrder] = useState("");
+  const [secondOrder, setSecondOrder] = useState("");
   const [carriedLotSite, setCarriedLotSite] = useState("");
   const [carriedLotLocation, setCarriedLotLocation] = useState("");
   const [carriedStorage, setCarriedStorage] = useState("");
+  const [carriedFirstOrder, setCarriedFirstOrder] = useState("");
+  const [carriedSecondOrder, setCarriedSecondOrder] = useState("");
   const [keepLotContext, setKeepLotContext] = useState(true);
   const [hasLotContext, setHasLotContext] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -392,14 +396,15 @@ export default function Home() {
     if (!store) throw new Error("Session storage is unavailable.");
     const nextSession = await store.getSession(db, id);
     const nextWeights = nextSession ? await store.getWeights(db, nextSession.id) : [];
-    const lotContext = nextSession ? await store.getLotContext(db, nextSession.id) : { keepForNext: true, hasValue: false, lotSite: "", lotLocation: "", storage: "" };
+    const lotContext = nextSession ? await store.getLotContext(db, nextSession.id) : { keepForNext: true, hasValue: false, lotSite: "", lotLocation: "", storage: "", firstOrder: "", secondOrder: "" };
     const nextPlots = nextSession?.plots ?? [];
     exactPendingWeightRef.current = null; weightEditedRef.current = false;
     scanAlertRef.current = null;
     setSession(nextSession); setPlots(nextPlots); setWeights(nextWeights); setWeightVariable(nextSession?.weightVariable || "plotWeight"); setSelected(null); setScanAlert(null);
     setKeepLotContext(lotContext.keepForNext); setHasLotContext(lotContext.hasValue);
     setCarriedLotSite(lotContext.lotSite); setCarriedLotLocation(lotContext.lotLocation); setCarriedStorage(lotContext.storage);
-    setLotSite(""); setLotLocation(""); setLotStorage("");
+    setCarriedFirstOrder(lotContext.firstOrder); setCarriedSecondOrder(lotContext.secondOrder);
+    setLotSite(""); setLotLocation(""); setLotStorage(""); setFirstOrder(""); setSecondOrder("");
     setSelectedTrials([...new Set(nextPlots.map((plot) => plot.entityName || "Unnamed trial"))]); setSort({ key: "", direction: "asc" });
     setScanValue(""); setWeightValue(""); setPage(1); setSessions(await store.listSessions(db));
     window.setTimeout(() => scanRef.current?.focus(), 0);
@@ -524,10 +529,13 @@ export default function Home() {
       setLotSite(String(record.lotSite || ""));
       setLotLocation(String(record.lotLocation || ""));
       setLotStorage(record.storage || "");
+      setFirstOrder(record.firstOrder || "");
+      setSecondOrder(record.secondOrder || "");
     } else if (!keepLotContext || !hasLotContext) {
-      setLotSite(""); setLotLocation(""); setLotStorage("");
+      setLotSite(""); setLotLocation(""); setLotStorage(""); setFirstOrder(""); setSecondOrder("");
     } else {
       setLotSite(carriedLotSite); setLotLocation(carriedLotLocation); setLotStorage(carriedStorage);
+      setFirstOrder(carriedFirstOrder); setSecondOrder(carriedSecondOrder);
     }
     window.setTimeout(() => scanRef.current?.focus(), 0);
   }
@@ -563,18 +571,20 @@ export default function Home() {
     try {
       const saved = await window.GdmWeighingStore.saveWeight(
         database, session.id, selected, value, scaleConnected ? "serial" : "manual", undefined,
-        { lotSite, lotLocation, storage: lotStorage, keepForNext: keepLotContext },
+        { lotSite, lotLocation, storage: lotStorage, firstOrder, secondOrder, keepForNext: keepLotContext },
       );
       setWeights((current) => [saved, ...current.filter((item) => normalize(item.uuid) !== normalize(saved.uuid))]);
       setSession((current) => current ? { ...current, updatedAt: new Date().toISOString() } : current);
       if (keepLotContext) {
         setCarriedLotSite(saved.lotSite || ""); setCarriedLotLocation(saved.lotLocation || ""); setCarriedStorage(saved.storage || ""); setHasLotContext(true);
+        setCarriedFirstOrder(saved.firstOrder || ""); setCarriedSecondOrder(saved.secondOrder || "");
       } else {
         setCarriedLotSite(""); setCarriedLotLocation(""); setCarriedStorage(""); setHasLotContext(false);
+        setCarriedFirstOrder(""); setCarriedSecondOrder("");
       }
       toast.success(`${currentWeightLabel} ${formatNumber(value, decimalPlaces)} saved for plot ${selected.obsName}.`);
       exactPendingWeightRef.current = null; weightEditedRef.current = false;
-      setSelected(null); setScanValue(""); setWeightValue(""); setLotSite(""); setLotLocation(""); setLotStorage(""); window.setTimeout(() => scanRef.current?.focus(), 0);
+      setSelected(null); setScanValue(""); setWeightValue(""); setLotSite(""); setLotLocation(""); setLotStorage(""); setFirstOrder(""); setSecondOrder(""); window.setTimeout(() => scanRef.current?.focus(), 0);
     } catch (error) { toast.error(error instanceof Error ? error.message : "Could not save the weight."); }
     finally { setSaving(false); }
   }
@@ -614,12 +624,13 @@ export default function Home() {
 
   async function changeKeepLotContext(keep: boolean) {
     setKeepLotContext(keep);
-    if (!keep) { setCarriedLotSite(""); setCarriedLotLocation(""); setCarriedStorage(""); setHasLotContext(false); }
+    if (!keep) { setCarriedLotSite(""); setCarriedLotLocation(""); setCarriedStorage(""); setCarriedFirstOrder(""); setCarriedSecondOrder(""); setHasLotContext(false); }
     if (!database || !session || !window.GdmWeighingStore) return;
     try {
       await window.GdmWeighingStore.setLotContext(database, session.id, {
         keepForNext: keep, hasValue: keep ? hasLotContext : false,
         lotSite: keep ? carriedLotSite : "", lotLocation: keep ? carriedLotLocation : "", storage: keep ? carriedStorage : "",
+        firstOrder: keep ? carriedFirstOrder : "", secondOrder: keep ? carriedSecondOrder : "",
       });
     } catch (error) { toast.error(error instanceof Error ? error.message : "Could not save the lot field preference."); }
   }
@@ -799,20 +810,27 @@ export default function Home() {
 
           {selected && <article className="overflow-hidden rounded-lg border border-[#cbdcec] bg-white shadow-[0_10px_28px_rgba(26,59,93,0.08)]">
             <div className="bg-[#1f4269] p-5 text-white sm:p-6"><div className="mb-5 flex justify-between gap-3"><span className="rounded-full bg-[#d9e9f6] px-3 py-1.5 text-sm font-black uppercase text-[#173f66]">✓ Plot found</span>{existingWeight && <span className="rounded-full bg-[#f5cf77] px-3 py-1.5 text-sm font-bold text-[#6a4700]">Already weighed: {currentWeightLabel} {formatNumber(existingWeight.weight, decimalPlaces)}</span>}</div><div className="grid gap-5 md:grid-cols-[1.45fr_.55fr]"><div><p className="text-xs font-bold uppercase tracking-[.14em] text-[#bbcee1]">Entity name</p><h2 className="text-3xl font-extrabold">{selected.entityName}</h2><p className="mt-5 text-xs font-bold uppercase tracking-[.14em] text-[#bbcee1]">(OBS) Name</p><p className="text-5xl font-black">{selected.obsName}</p></div><div className="rounded-md border border-white/20 bg-white/10 p-4"><p className="text-xs font-bold uppercase tracking-[.12em] text-[#bbcee1]">(GER) Name</p><p className="mt-2 text-xl font-extrabold">{selected.gerName || "—"}</p><p className="mt-4 flex items-center gap-2 text-sm text-[#c7d7e7]"><MapPin className="size-4" /> Location: {selected.location || "Unspecified"}</p><p className="mt-2 text-sm text-[#c7d7e7]">Trial site: {selected.site || "Unspecified"}</p></div></div></div>
-            <div className="grid gap-5 p-5 sm:p-6 xl:grid-cols-[minmax(0,1fr)_430px]">
-              <dl className="self-start overflow-hidden rounded-md border border-[#cfdeeb] bg-[#f7fafe]"><div className="grid grid-cols-2 sm:grid-cols-5">{[["Season year",selected.seasonYear],["Block",selected.block],["Entry code",selected.entryCode],["Row",selected.row],["Column",selected.column]].map(([label,value]) => <div key={label} className="border-b border-r border-[#d8e4ee] px-3 py-2.5 last:border-r-0 sm:border-b-0"><dt className="text-[10px] font-bold uppercase tracking-[.08em] text-[#6d8195]">{label}</dt><dd className="mt-0.5 text-xl font-black leading-tight">{value || "—"}</dd></div>)}</div><div className="px-3 py-2.5"><dt className="text-[10px] font-bold uppercase tracking-[.08em] text-[#6d8195]">Identifiers</dt><dd className="mt-1 grid gap-x-4 gap-y-1 text-xs sm:grid-cols-[minmax(120px,.45fr)_1fr]"><span><strong>FEID:</strong> {selected.feid}</span><span className="break-all"><strong>UUID:</strong> {selected.uuid}</span></dd></div></dl>
-              <form onSubmit={(event) => { event.preventDefault(); void saveCurrentWeight(); }} className="rounded-md border border-[#cbdcec] bg-[#eaf2f9] p-4 sm:p-5">
-                <label htmlFor="plot-weight" className="flex items-center gap-2 text-sm font-bold uppercase tracking-[.1em]"><Scale className="size-4" /> {currentWeightLabel}</label>
-                <Input id="plot-weight" ref={weightRef} inputMode="decimal" value={weightValue} onChange={(event) => { weightEditedRef.current = true; exactPendingWeightRef.current = null; setWeightValue(event.target.value); }} className="mt-3 h-16 border-2 bg-white px-4 text-3xl font-black" placeholder={formatInputNumber(0, decimalPlaces)} />
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  <label className="text-xs font-bold uppercase tracking-[.08em] text-[#526f89]">Lot site<Input value={lotSite} onChange={(event) => setLotSite(event.target.value)} className="mt-1 h-10 bg-white text-sm font-semibold normal-case tracking-normal" placeholder="Lot site" /></label>
-                  <label className="text-xs font-bold uppercase tracking-[.08em] text-[#526f89]">Storage<Input value={lotStorage} onChange={(event) => setLotStorage(event.target.value)} className="mt-1 h-10 bg-white text-sm font-semibold normal-case tracking-normal" placeholder="Storage" /></label>
-                  <label className="text-xs font-bold uppercase tracking-[.08em] text-[#526f89] sm:col-span-2">Lot location<Input value={lotLocation} onChange={(event) => setLotLocation(event.target.value)} className="mt-1 h-10 bg-white text-sm font-semibold normal-case tracking-normal" placeholder="Lot location" /></label>
+            <form onSubmit={(event) => { event.preventDefault(); void saveCurrentWeight(); }} className="space-y-4 p-5 sm:p-6">
+              <dl className="overflow-hidden rounded-md border border-[#cfdeeb] bg-[#f7fafe]"><div className="grid grid-cols-2 sm:grid-cols-5">{[["Season year",selected.seasonYear],["Block",selected.block],["Entry code",selected.entryCode],["Row",selected.row],["Column",selected.column]].map(([label,value]) => <div key={label} className="border-b border-r border-[#d8e4ee] px-3 py-2.5 last:border-r-0 sm:border-b-0"><dt className="text-[10px] font-bold uppercase tracking-[.08em] text-[#6d8195]">{label}</dt><dd className="mt-0.5 text-xl font-black leading-tight">{value || "—"}</dd></div>)}</div><div className="px-3 py-2.5"><dt className="text-[10px] font-bold uppercase tracking-[.08em] text-[#6d8195]">Identifiers</dt><dd className="mt-1 grid gap-x-4 gap-y-1 text-xs sm:grid-cols-[minmax(120px,.45fr)_1fr]"><span><strong>FEID:</strong> {selected.feid}</span><span className="break-all"><strong>UUID:</strong> {selected.uuid}</span></dd></div></dl>
+              <section aria-labelledby="weight-entry-title" className="grid gap-3 rounded-md border border-[#cbdcec] bg-[#eaf2f9] p-4 sm:grid-cols-[minmax(0,1fr)_260px] sm:items-end sm:p-5">
+                <div>
+                  <label id="weight-entry-title" htmlFor="plot-weight" className="flex items-center gap-2 text-sm font-bold uppercase tracking-[.1em]"><Scale className="size-4" /> {currentWeightLabel}</label>
+                  <Input id="plot-weight" ref={weightRef} inputMode="decimal" value={weightValue} onChange={(event) => { weightEditedRef.current = true; exactPendingWeightRef.current = null; setWeightValue(event.target.value); }} className="mt-3 h-16 border-2 bg-white px-4 text-3xl font-black" placeholder={formatInputNumber(0, decimalPlaces)} />
                 </div>
-                <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs font-bold text-[#365b80]"><input type="checkbox" checked={keepLotContext} onChange={(event) => void changeKeepLotContext(event.target.checked)} className="mt-0.5 accent-[#1f4269]" /><span>Keep Lot site, Lot location and Storage for next plot</span></label>
-                <Button type="submit" disabled={saving} className="mt-3 h-12 w-full rounded-[5px] bg-[#1f4269] text-base font-black">{saving ? <LoaderCircle className="animate-spin" /> : <Check />} {existingWeight ? `Update ${currentWeightLabel}` : `Save ${currentWeightLabel}`}</Button>
-              </form>
-            </div>
+                <Button type="submit" disabled={saving} className="h-12 w-full rounded-[5px] bg-[#1f4269] text-base font-black">{saving ? <LoaderCircle className="animate-spin" /> : <Check />} {existingWeight ? `Update ${currentWeightLabel}` : `Save ${currentWeightLabel}`}</Button>
+              </section>
+              <section aria-labelledby="lot-details-title" className="rounded-md border border-[#cfdeeb] bg-[#f7fafe] p-4">
+                  <h3 id="lot-details-title" className="text-xs font-black uppercase tracking-[.1em] text-[#315b86]">Lot details</h3>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <label className="text-xs font-bold uppercase tracking-[.08em] text-[#526f89]">Lot site<Input value={lotSite} onChange={(event) => setLotSite(event.target.value)} className="mt-1 h-10 bg-white text-sm font-semibold normal-case tracking-normal" placeholder="Lot site" /></label>
+                    <label className="text-xs font-bold uppercase tracking-[.08em] text-[#526f89]">Storage<Input value={lotStorage} onChange={(event) => setLotStorage(event.target.value)} className="mt-1 h-10 bg-white text-sm font-semibold normal-case tracking-normal" placeholder="Storage" /></label>
+                    <label className="text-xs font-bold uppercase tracking-[.08em] text-[#526f89] sm:col-span-2">Lot location<Input value={lotLocation} onChange={(event) => setLotLocation(event.target.value)} className="mt-1 h-10 bg-white text-sm font-semibold normal-case tracking-normal" placeholder="Lot location" /></label>
+                    <label className="text-xs font-bold uppercase tracking-[.08em] text-[#526f89]">First order<Input value={firstOrder} onChange={(event) => setFirstOrder(event.target.value)} className="mt-1 h-10 bg-white text-sm font-semibold normal-case tracking-normal" placeholder="First order" /></label>
+                    <label className="text-xs font-bold uppercase tracking-[.08em] text-[#526f89]">Second order<Input value={secondOrder} onChange={(event) => setSecondOrder(event.target.value)} className="mt-1 h-10 bg-white text-sm font-semibold normal-case tracking-normal" placeholder="Second order" /></label>
+                  </div>
+                  <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs font-bold text-[#365b80]"><input type="checkbox" checked={keepLotContext} onChange={(event) => void changeKeepLotContext(event.target.checked)} className="mt-0.5 accent-[#1f4269]" /><span>Keep Lot site, Lot location, Storage, First order and Second order for next plot</span></label>
+              </section>
+            </form>
           </article>}
 
           <section className="rounded-lg border border-[#cbdcec] bg-white p-5 shadow-[0_10px_28px_rgba(26,59,93,0.08)] sm:p-6"><div className="flex items-center justify-between border-b-2 border-[#d6e3ef] pb-3"><div><p className="text-sm font-bold uppercase tracking-[.1em] text-[#315b86]">◷ Recent history</p><h2 className="text-2xl font-extrabold">Latest weighings</h2></div><span className="rounded bg-[#eaf3fb] px-2.5 py-1 text-xs font-bold">10 most recent</span></div>{recent.length ? <div className="divide-y divide-[#dbe6f0]">{recent.map((record) => <article key={record.key} className="grid items-center gap-3 py-3.5 sm:grid-cols-[1fr_auto_auto]"><div><p className="text-lg font-extrabold">Plot {record.obsName || "—"}</p><p className="text-xs text-[#657b90]">{record.entityName || "Unnamed trial"} · FEID {record.feid || "—"}</p></div><div className="sm:text-right"><small className="font-bold">{currentWeightLabel}</small><p className="text-xl font-black">{formatNumber(record.weight, decimalPlaces)}</p></div><time className="text-xs text-[#657b90]">{formatDateTime(record.weighedAt || record.updatedAt)}</time></article>)}</div> : <div className="grid min-h-48 place-content-center justify-items-center text-center"><Scale className="size-12 rounded-lg bg-[#dceaf6] p-3" /><strong className="mt-3">No weighings recorded</strong><p className="text-sm text-[#647a90]">Saved weighings will appear here automatically.</p></div>}</section>

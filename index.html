@@ -86,18 +86,21 @@
               <div class="ger-card"><p class="field-label">(GER) Name</p><strong id="ger-name"></strong><p id="location"></p></div>
             </div>
           </div>
-          <div class="plot-card__body">
+          <form id="weight-form" class="plot-card__body">
             <dl class="details-grid">
               <div><dt>Season year</dt><dd id="season-year"></dd></div><div><dt>Block</dt><dd id="block"></dd></div><div><dt>Entry code</dt><dd id="entry-code"></dd></div><div><dt>Row</dt><dd id="row"></dd></div><div><dt>Column</dt><dd id="column"></dd></div>
               <div class="identifiers"><dt>Identifiers</dt><dd><span><b>FEID:</b> <i id="feid"></i></span><span><b>UUID:</b> <i id="uuid"></i></span></dd></div>
             </dl>
-            <form id="weight-form" class="weight-form">
-              <label id="weight-field-label" for="plot-weight">⚖ Plot weight</label><input id="plot-weight" inputmode="decimal" autocomplete="off" placeholder="0.000" />
-              <div class="lot-fields"><label for="lot-site">Lot site<input id="lot-site" autocomplete="off" placeholder="Lot site" /></label><label for="lot-storage">Storage<input id="lot-storage" autocomplete="off" placeholder="Storage" /></label><label class="lot-location-field" for="lot-location">Lot location<input id="lot-location" autocomplete="off" placeholder="Lot location" /></label></div>
-              <label class="keep-lot-context"><input id="keep-lot-context" type="checkbox" checked /><span>Keep Lot site, Lot location and Storage for next plot</span></label>
+            <div class="weight-form">
+              <div class="weight-field"><label id="weight-field-label" for="plot-weight">⚖ Plot weight</label><input id="plot-weight" inputmode="decimal" autocomplete="off" placeholder="0.000" /></div>
               <button id="save-button" type="submit">✓ Save Plot weight</button>
-            </form>
-          </div>
+            </div>
+            <section class="lot-details" aria-labelledby="lot-details-title">
+              <h3 id="lot-details-title">Lot details</h3>
+              <div class="lot-fields"><label for="lot-site">Lot site<input id="lot-site" autocomplete="off" placeholder="Lot site" /></label><label for="lot-storage">Storage<input id="lot-storage" autocomplete="off" placeholder="Storage" /></label><label class="lot-location-field" for="lot-location">Lot location<input id="lot-location" autocomplete="off" placeholder="Lot location" /></label><label for="first-order">First order<input id="first-order" autocomplete="off" placeholder="First order" /></label><label for="second-order">Second order<input id="second-order" autocomplete="off" placeholder="Second order" /></label></div>
+              <label class="keep-lot-context"><input id="keep-lot-context" type="checkbox" checked /><span>Keep Lot site, Lot location, Storage, First order and Second order for next plot</span></label>
+            </section>
+          </form>
         </article>
 
         <section class="panel recent-weighings" aria-labelledby="recent-title">

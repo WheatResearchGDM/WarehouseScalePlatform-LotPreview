@@ -12,7 +12,7 @@ const plots = [
   { id: "2", feid: "20", uuid: "B", seasonYear: "2026", entityName: "Trial A", trialType: "EYT", site: "Site 1", location: "North", row: "1", column: "2", entryCode: "2", block: "1", obsName: "1002", gid: "G2", gerName: "R2", initialPlot: 1, finalPlot: 100 },
   { id: "3", feid: "30", uuid: "C", seasonYear: "2026", entityName: "Trial A", trialType: "EYT", site: "Site 2", location: "South", row: "1", column: "3", entryCode: "3", block: "1", obsName: "1003", gid: "G3", gerName: "R3", initialPlot: 1, finalPlot: 100 },
 ];
-const weights = [{ uuid: "A", weight: 0, weightVariable: "plotWeight", lotSite: "Operational site", lotLocation: "Dispatch area", storage: "Cold room", weighedAt: "2026-10-08T12:00:00.000Z" }];
+const weights = [{ uuid: "A", weight: 0, weightVariable: "plotWeight", lotSite: "Operational site", lotLocation: "Dispatch area", storage: "Cold room", firstOrder: "Order A", secondOrder: "Order B", weighedAt: "2026-10-08T12:00:00.000Z" }];
 
 assert.deepEqual(globalThis.GdmWeighingUtils.overallProgress(plots, weights), { total: 3, completed: 1, remaining: 2, percent: 33 });
 assert.deepEqual(globalThis.GdmWeighingUtils.groupProgress(plots, weights, "location").map(({ label, total, completed }) => ({ label, total, completed })), [
@@ -21,13 +21,15 @@ assert.deepEqual(globalThis.GdmWeighingUtils.groupProgress(plots, weights, "loca
 ]);
 const metadataMerge = globalThis.GdmWeighingUtils.prepareMerge(
   plots,
-  [{ uuid: "A", weight: 0, weightVariable: "plotWeight", weighedAt: "2026-10-08T12:00:00.000Z", lotSite: "", lotLocation: "", storage: "" }],
-  [{ uuid: "A", weight: 0, weightVariable: "plotWeight", weighedAt: "2026-10-08T12:00:00.000Z", lotSite: "Imported site", lotLocation: "Imported destination", storage: "Imported storage" }],
+  [{ uuid: "A", weight: 0, weightVariable: "plotWeight", weighedAt: "2026-10-08T12:00:00.000Z", lotSite: "", lotLocation: "", storage: "", firstOrder: "", secondOrder: "" }],
+  [{ uuid: "A", weight: 0, weightVariable: "plotWeight", weighedAt: "2026-10-08T12:00:00.000Z", lotSite: "Imported site", lotLocation: "Imported destination", storage: "Imported storage", firstOrder: "Imported first", secondOrder: "Imported second" }],
 );
 assert.equal(metadataMerge.ready.length, 1);
 assert.equal(metadataMerge.ready[0].lotSite, "Imported site");
 assert.equal(metadataMerge.ready[0].lotLocation, "Imported destination");
 assert.equal(metadataMerge.ready[0].storage, "Imported storage");
+assert.equal(metadataMerge.ready[0].firstOrder, "Imported first");
+assert.equal(metadataMerge.ready[0].secondOrder, "Imported second");
 
 const capturedSheets = [];
 const downloadedNames = [];
@@ -54,6 +56,8 @@ assert.equal(sessionRows[0]["Plot weight"], 0);
 assert.equal("PW" in sessionRows[0], false);
 assert.equal("Seed weight" in sessionRows[0], false);
 assert.equal(sessionRows[0]["Lot location"], "Dispatch area");
+assert.equal("First order" in sessionRows[0], false);
+assert.equal("Second order" in sessionRows[0], false);
 capturedSheets.length = 0;
 assert.equal(globalThis.GdmWeighingUtils.exportLots(session, weights, "xlsx", plots, 2), 1);
 const lotRows = capturedSheets[0];
@@ -61,6 +65,8 @@ assert.equal(lotRows[0]["Lot name"], "2026 | Trial A | 1 | 1001");
 assert.equal(lotRows[0]["Plot weight"], 0);
 assert.equal("Weight" in lotRows[0], false);
 assert.equal("PW" in lotRows[0], false);
+assert.equal(lotRows[0]["First order"], "Order A");
+assert.equal(lotRows[0]["Second order"], "Order B");
 
 downloadedNames.length = 0;
 const bundled = globalThis.GdmWeighingUtils.exportSessionAndLots(session, weights, "xlsx", plots, 2);
@@ -101,18 +107,20 @@ assert.equal(requiredHeaders.includes("Initial plot"), false);
 assert.equal(requiredHeaders.includes("Final plot"), false);
 assert.equal(globalThis.GdmPlotImport.exportHeaders.includes("Initial plot"), true);
 assert.equal(globalThis.GdmPlotImport.exportHeaders.includes("Final plot"), true);
+assert.equal(globalThis.GdmPlotImport.exportHeaders.includes("First order"), true);
+assert.equal(globalThis.GdmPlotImport.exportHeaders.includes("Second order"), true);
 
 const baseValues = {
   ID: "1", FEID: "10", UUID: "A", "Season year": "2026", "Entity name": "Trial A", "Trial type": "EYT",
   Site: "Site 1", Location: "North", Row: "1", Column: "1", "Entry code": "1", Block: "1", "(OBS) Name": "1001",
   GID: "G1", "(GER) Name": "R1", "Initial plot": 1, "Final plot": 100,
-  "Lot site": "Lot Site 1", "Lot location": "Dispatch area", Storage: "Cold room", "Weighed at": "2026-10-08T12:00:00.000Z",
+  "Lot site": "Lot Site 1", "Lot location": "Dispatch area", Storage: "Cold room", "First order": "Imported first", "Second order": "Imported second", "Weighed at": "2026-10-08T12:00:00.000Z",
 };
 let importRows = [];
 globalThis.XLSX.read = () => ({ SheetNames: ["Data"], Sheets: { Data: {} } });
 globalThis.XLSX.utils.sheet_to_json = () => importRows;
 const parse = async (extraHeaders = [], overrides = {}) => {
-  const headers = [...requiredHeaders, "Site", "Lot site", "Lot location", "Storage", "Weighed at", ...extraHeaders];
+  const headers = [...requiredHeaders, "Site", "Lot site", "Lot location", "Storage", "First order", "Second order", "Weighed at", ...extraHeaders];
   const values = { ...baseValues, ...overrides };
   importRows = [headers, headers.map((header) => values[header] ?? "")];
   return globalThis.GdmPlotImport.parseExcelFile({ name: "source.xlsx", async arrayBuffer() { return new ArrayBuffer(0); } });
@@ -152,6 +160,8 @@ for (const [header, variable] of [["Plot weight", "plotWeight"], ["PW", "plotWei
   assert.equal(imported.importedWeights[0].weight, 0);
   assert.equal(imported.importedWeights[0].weightVariable, variable);
   assert.equal(imported.importedWeights[0].lotSite, "Lot Site 1");
+  assert.equal(imported.importedWeights[0].firstOrder, "Imported first");
+  assert.equal(imported.importedWeights[0].secondOrder, "Imported second");
 }
 
 const bothVariables = await parse(["Plot weight", "Seed weight"], { "Plot weight": 10, "Seed weight": 20 });
@@ -181,5 +191,9 @@ assert.equal(staticHtml.includes('id="export-prompt"'), true);
 const lotFields = staticHtml.match(/<div class="lot-fields">([\s\S]*?)<\/div>/)?.[1] || "";
 assert.ok(lotFields.indexOf("Lot site") < lotFields.indexOf("Storage"));
 assert.ok(lotFields.indexOf("Storage") < lotFields.indexOf("Lot location"));
+assert.ok(lotFields.indexOf("Lot location") < lotFields.indexOf("First order"));
+assert.ok(lotFields.indexOf("First order") < lotFields.indexOf("Second order"));
+assert.ok(staticHtml.indexOf('class="weight-form"') < staticHtml.indexOf("Lot details"));
+assert.ok(staticHtml.includes("Keep Lot site, Lot location, Storage, First order and Second order for next plot"));
 
 console.log("Weight variable and lot feature validation passed.");
