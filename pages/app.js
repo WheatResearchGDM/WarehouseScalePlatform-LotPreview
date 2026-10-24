@@ -12,6 +12,7 @@
     lotSite: "", lotLocation: "", lotStorage: "", firstOrder: "", secondOrder: "", carriedLotSite: "", carriedLotLocation: "", carriedStorage: "", carriedFirstOrder: "", carriedSecondOrder: "", keepLotContext: true, hasLotContext: false,
     scanAlert: null, scanAlertOpenedAt: 0,
     newSessionOpen: false, newSessionBusy: false, saveTask: null, draftBaseline: "", importing: false,
+    exportArtifact: null, exportTrigger: null, exportBusy: false,
     selectedTrials: new Set(), sortKey: "", sortDirection: "asc", filteredPlots: [],
   };
   const byFeid = new Map();
@@ -29,6 +30,7 @@
     recentList: $("recent-list"), recentEmpty: $("recent-empty"), toast: $("toast"),
     scanAlert: $("scan-alert"), scanAlertTitle: $("scan-alert-title"), scanAlertMessage: $("scan-alert-message"), scanAlertAction: $("scan-alert-action"), scanAlertUpdate: $("scan-alert-update"), scanAlertHint: $("scan-alert-hint"),
     newPrompt: $("new-session-prompt"), newError: $("new-session-error"), newSave: $("new-session-save"), newDiscard: $("new-session-discard"), newCancel: $("new-session-cancel"),
+    exportPrompt: $("export-name-prompt"), exportTitle: $("export-name-title"), exportForm: $("export-name-form"), exportName: $("export-file-name"), exportHelp: $("export-name-help"), exportError: $("export-name-error"), exportDownload: $("export-name-download"), exportCancel: $("export-name-cancel"),
     connectScale: $("connect-scale"), baudRate: $("baud-rate"), scaleFactor: $("scale-factor"), decimalPlaces: $("decimal-places"), scaleStatus: $("scale-status"), scaleWeight: $("scale-weight"), scaleReadingNote: $("scale-reading-note"), serialHelp: $("serial-help"),
     tableSearch: $("table-search"), trialFilter: $("trial-filter"), locationFilter: $("location-filter"), statusFilter: $("status-filter"), tableBody: $("plot-table-body"),
     pagePrev: $("page-prev"), pageNext: $("page-next"), pageNumber: $("page-number"), pageSummary: $("page-summary"), tableCount: $("table-count"),
@@ -463,11 +465,36 @@
     }
   }
   function exportFiltered(format) {
-    if (!state.session) return;
+    if (!state.session || state.exportArtifact) return;
     try {
-      const result = window.GdmWeighingUtils.exportSession(state.session, state.weights, format, state.filteredPlots, state.decimalPlaces);
-      showToast(`${result.count} filtered records exported with weights and lot details in one file.${result.duplicateLotNames.length ? ` Notice: ${result.duplicateLotNames.length} repeated Lot name(s); all UUID records were kept.` : ""}`);
+      const artifact = window.GdmWeighingUtils.prepareSessionExport(state.session, state.weights, format, state.filteredPlots, state.decimalPlaces);
+      state.exportArtifact = artifact; state.exportTrigger = document.activeElement;
+      refs.exportTitle.textContent = format === "xlsx" ? "Export Excel" : "Export CSV";
+      refs.exportName.value = artifact.fileName;
+      refs.exportHelp.textContent = `${artifact.count} filtered records. The .${format} extension is kept automatically.`;
+      refs.exportError.hidden = true; refs.exportName.setAttribute("aria-invalid", "false");
+      refs.exportPrompt.hidden = false;
+      refs.exportName.focus(); refs.exportName.setSelectionRange(0, artifact.fileName.length - format.length - 1);
     } catch (error) { showToast(error instanceof Error ? error.message : "Could not export results.", true); }
+  }
+
+  function closeExportDialog() {
+    if (state.exportBusy) return;
+    state.exportArtifact = null; refs.exportPrompt.hidden = true;
+    state.exportTrigger?.focus();
+  }
+  function downloadExport(event) {
+    event.preventDefault();
+    if (!state.exportArtifact || state.exportBusy) return;
+    state.exportBusy = true; refs.exportDownload.disabled = true;
+    try {
+      const result = window.GdmWeighingUtils.downloadPreparedExport(state.exportArtifact, refs.exportName.value);
+      state.exportBusy = false; closeExportDialog();
+      showToast(`${result.count} filtered records exported with weights and lot details in one file.${result.duplicateLotNames.length ? ` Notice: ${result.duplicateLotNames.length} repeated Lot name(s); all UUID records were kept.` : ""}`);
+    } catch (error) {
+      refs.exportError.textContent = error instanceof Error ? error.message : "Could not export results.";
+      refs.exportError.hidden = false; refs.exportName.setAttribute("aria-invalid", "true"); refs.exportName.focus();
+    } finally { state.exportBusy = false; refs.exportDownload.disabled = false; }
   }
 
   function parseScaleWeight(rawLine) {
@@ -483,7 +510,7 @@
     const factor = state.scaleExponent ? ` · ${scaleFactorLabel()}` : "";
     refs.scaleReadingNote.textContent = state.selected ? `${weightLabel()} filled automatically${factor}` : `Scan a plot to apply${factor}`;
     refs.scaleWeight.title = `Raw reading: ${formatRawNumber(rawValue)}${rawLine ? ` (${String(rawLine).trim()})` : ""}`;
-    if (state.selected && !state.newSessionOpen && !state.scanAlert && !state.saveTask) { state.exactPendingWeight = value; state.weightEdited = false; refs.weight.value = formatInputNumber(value); }
+    if (state.selected && !state.newSessionOpen && !state.exportArtifact && !state.scanAlert && !state.saveTask) { state.exactPendingWeight = value; state.weightEdited = false; refs.weight.value = formatInputNumber(value); }
   }
   function consumeSerialText(chunk) {
     state.serialBuffer += chunk;
@@ -529,7 +556,7 @@
 
   refs.scanForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    if (state.scanAlert || state.newSessionOpen || state.saveTask) return;
+    if (state.scanAlert || state.newSessionOpen || state.exportArtifact || state.saveTask) return;
     if (!state.session) { showToast("Import a workbook before weighing plots.", true); return; }
     const scannedValue = refs.scanValue.value.trim();
     const code = normalize(refs.scanValue.value);
@@ -624,6 +651,17 @@
   refs.dataFile.addEventListener("change", () => { const [file] = refs.dataFile.files || []; if (file) void importFile(file); });
   refs.dashboardExportExcel.addEventListener("click", () => exportFiltered("xlsx"));
   refs.dashboardExportCsv.addEventListener("click", () => exportFiltered("csv"));
+  refs.exportForm.addEventListener("submit", downloadExport);
+  refs.exportCancel.addEventListener("click", closeExportDialog);
+  refs.exportName.addEventListener("input", () => { refs.exportError.hidden = true; refs.exportName.setAttribute("aria-invalid", "false"); });
+  refs.exportPrompt.addEventListener("keydown", (event) => {
+    event.stopPropagation();
+    if (event.key === "Escape") { event.preventDefault(); closeExportDialog(); return; }
+    if (event.key === "Enter" && event.repeat) event.preventDefault();
+    if (event.key !== "Tab") return;
+    if (event.shiftKey && document.activeElement === refs.exportName) { event.preventDefault(); refs.exportCancel.focus(); }
+    else if (!event.shiftKey && document.activeElement === refs.exportCancel) { event.preventDefault(); refs.exportName.focus(); }
+  });
   refs.sessionSelect.addEventListener("change", () => void setActiveSession(refs.sessionSelect.value));
   refs.trialSlicerButton.addEventListener("click", () => {
     refs.trialSlicerMenu.hidden = !refs.trialSlicerMenu.hidden;

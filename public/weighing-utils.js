@@ -237,13 +237,30 @@
     }
   }
 
+  function exportFileName(value, suggestedName) {
+    const extension = suggestedName.endsWith(".xlsx") ? ".xlsx" : ".csv";
+    const name = String(value ?? "").trim().replace(/\.(xlsx|csv)$/i, "");
+    if (!name.trim()) throw new Error("Enter a file name.");
+    if (/[<>:"/\\|?*]/.test(name) || [...name].some((character) => character.charCodeAt(0) < 32)) {
+      throw new Error('The file name cannot contain < > : " / \\ | ? * or control characters.');
+    }
+    if (/[. ]$/.test(name) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name)) {
+      throw new Error("Choose a different file name, without a trailing dot or space.");
+    }
+    return name + extension;
+  }
+
+  function downloadPreparedExport(artifact, name = artifact.fileName) {
+    const fileName = exportFileName(name, artifact.fileName);
+    downloadBlob(artifact.blob, fileName);
+    return { count: artifact.count, duplicateLotNames: artifact.duplicateLotNames, fileName };
+  }
+
   function exportSession(session, weights, format, plots = session.plots, places = 0) {
-    const artifact = prepareSessionExport(session, weights, format, plots, places);
-    downloadBlob(artifact.blob, artifact.fileName);
-    return { count: artifact.count, duplicateLotNames: artifact.duplicateLotNames };
+    return downloadPreparedExport(prepareSessionExport(session, weights, format, plots, places));
   }
 
   global.GdmWeighingUtils = { normalize, decimalPlaces, fixedDecimal, byUuid, groupProgress, overallProgress, prepareMerge,
-    exportRows, prepareSessionExport, exportSession, weightVariables, weightVariable, weightLabel,
+    exportRows, prepareSessionExport, exportFileName, downloadPreparedExport, exportSession, weightVariables, weightVariable, weightLabel,
     lotFields, lotCatalog, lotDetails, hasLotDetails, selectLotDetails, lotOptions, importVariable, lotName };
 })(window);

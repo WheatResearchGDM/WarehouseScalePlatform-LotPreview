@@ -24,7 +24,8 @@ const asFile = (blob, name) => ({ name, arrayBuffer: () => blob.arrayBuffer() })
 const headers = ["Lot name", "Lot site", "Storage", "Lot location", "First order", "Second order", "Lot weight"];
 const stamp = new Date("2026-10-24T15:32:18.000Z");
 let downloads = 0;
-globalThis.document = { body: { appendChild() {} }, createElement() { return { click() { downloads++; }, remove() {} }; } };
+let lastDownloadName = "";
+globalThis.document = { body: { appendChild() {} }, createElement() { return { click() { downloads++; lastDownloadName = this.download; }, remove() {} }; } };
 const originalCreate = URL.createObjectURL;
 URL.createObjectURL = () => "blob:test";
 URL.revokeObjectURL = () => {};
@@ -74,6 +75,27 @@ for (const variable of ["plotWeight", "seedWeight"]) {
     assert.equal(downloads - before, 1);
     assert.equal(downloaded.count, 3);
   }
+}
+for (const format of ["xlsx", "csv"]) {
+  const before = downloads;
+  const artifact = utils.prepareSessionExport(session, weights, format, plots, 4, stamp);
+  assert.equal(downloads, before, "Preparing the naming dialog must not start a download");
+  const originalBytes = await artifact.blob.arrayBuffer();
+  const defaultResult = utils.downloadPreparedExport(artifact);
+  assert.equal(lastDownloadName, artifact.fileName, "Keep the suggested name unchanged by default");
+  assert.equal(defaultResult.fileName, artifact.fileName);
+  const customResult = utils.downloadPreparedExport(artifact, "Pesagem São Paulo - lote 01");
+  assert.equal(lastDownloadName, `Pesagem São Paulo - lote 01.${format}`);
+  assert.equal(customResult.count, 3);
+  assert.deepEqual(await artifact.blob.arrayBuffer(), originalBytes, "Renaming must not regenerate or modify the data/timestamps");
+  assert.equal(downloads - before, 2);
+  assert.equal(utils.exportFileName(`custom.${format.toUpperCase()}`, artifact.fileName), `custom.${format}`);
+  assert.equal(utils.exportFileName(`custom.${format === "csv" ? "xlsx" : "csv"}`, artifact.fileName), `custom.${format}`);
+  const countBeforeErrors = downloads;
+  for (const invalid of ["", "  ", `.${format}`, "../file", "folder\\file", "bad:name", "bad*name", "bad?name", "bad|name", "bad<name", 'bad"name', "bad\u0000name", "CON", "nul.txt", "LPT1", "name."]) {
+    assert.throws(() => utils.downloadPreparedExport(artifact, invalid));
+  }
+  assert.equal(downloads, countBeforeErrors, "Invalid names must not download a file");
 }
 URL.createObjectURL = originalCreate;
 assert.equal(weights[1].weight, 3689.0007, "Formatting must not mutate stored precision");
@@ -133,6 +155,8 @@ const html = await fs.readFile("index.html", "utf8");
 assert.equal(html.includes('id="export-prompt"'), false);
 assert.equal(html.includes("Export lots"), false);
 assert.ok(html.includes('id="new-session-prompt"'));
+assert.ok(html.includes('id="export-name-prompt"'));
+assert.ok(html.includes('id="export-file-name"'));
 assert.ok(html.includes('<select id="lot-site">'));
 assert.ok(html.includes('<select id="lot-storage" disabled>'));
 assert.ok(html.indexOf('class="hero-details"') < html.indexOf('id="weight-form"'));

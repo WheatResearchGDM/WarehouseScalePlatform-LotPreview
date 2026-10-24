@@ -43,6 +43,7 @@ type OverallProgress = { total: number; completed: number; remaining: number; pe
 type MergePlan = { ready: ImportedWeight[]; unresolved: ImportedWeight[]; ignored: number; unchanged: number; keptCurrent: number };
 type ScanAlert = { kind: "existing" | "unavailable"; title: string; message: string; actionLabel: string };
 type NewSessionPrompt = { error: string; busy: boolean };
+type PreparedExport = { blob: Blob; fileName: string; count: number; duplicateLotNames: string[] };
 type StoreApi = {
   init(): Promise<{ database: IDBDatabase; sessions: WeighingSession[]; activeSessionId: string | null }>;
   listSessions(database: IDBDatabase): Promise<WeighingSession[]>;
@@ -65,6 +66,8 @@ type UtilsApi = {
   overallProgress(plots: Plot[], weights: WeightRecord[]): OverallProgress;
   prepareMerge(plots: Plot[], current: WeightRecord[], imported: ImportedWeight[]): MergePlan;
   exportSession(session: WeighingSession, weights: WeightRecord[], format: "xlsx" | "csv", plots?: Plot[], decimalPlaces?: number): { count: number; duplicateLotNames: string[] };
+  prepareSessionExport(session: WeighingSession, weights: WeightRecord[], format: "xlsx" | "csv", plots?: Plot[], decimalPlaces?: number): PreparedExport;
+  downloadPreparedExport(artifact: PreparedExport, fileName: string): { count: number; duplicateLotNames: string[]; fileName: string };
   selectLotDetails(plot: Plot, record: WeightRecord | undefined, context: LotDetails & { keepForNext: boolean; hasValue: boolean }): LotDetails;
   lotOptions(site: string, current: string, isStorage?: boolean): { value: string; label: string }[];
   importVariable(result: ImportResult, current: WeightVariable, hasSession: boolean): WeightVariable;
@@ -208,6 +211,62 @@ function DonutCard({ item }: { item: ProgressItem }) {
   );
 }
 
+function ExportNameDialog({ artifact, onClose }: { artifact: PreparedExport; onClose: () => void }) {
+  const [name, setName] = useState(artifact.fileName);
+  const [error, setError] = useState("");
+  const nameRef = useRef<HTMLInputElement>(null);
+  const downloadRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const downloadingRef = useRef(false);
+  const extension = artifact.fileName.endsWith(".xlsx") ? ".xlsx" : ".csv";
+
+  useEffect(() => {
+    nameRef.current?.focus();
+    nameRef.current?.setSelectionRange(0, artifact.fileName.length - extension.length);
+  }, [artifact, extension]);
+
+  function download(event: FormEvent) {
+    event.preventDefault();
+    if (downloadingRef.current || !window.GdmWeighingUtils) return;
+    downloadingRef.current = true;
+    try {
+      const result = window.GdmWeighingUtils.downloadPreparedExport(artifact, name);
+      onClose();
+      toast.success(`${result.count} filtered records exported with weights and lot details in one file.`);
+      if (result.duplicateLotNames.length) toast.info(`Exported with ${result.duplicateLotNames.length} repeated Lot name(s). All UUID records were kept. Examples: ${result.duplicateLotNames.slice(0, 3).join("; ")}`, { duration: 10000 });
+    } catch (failure) {
+      downloadingRef.current = false;
+      setError(failure instanceof Error ? failure.message : "Could not export results.");
+      nameRef.current?.focus();
+    }
+  }
+
+  return <div className="fixed inset-0 z-[110] grid place-items-center bg-[#102840]/65 p-4">
+    <section role="dialog" aria-modal="true" aria-labelledby="export-name-title" aria-describedby="export-name-description" className="w-full max-w-xl rounded-xl border-2 border-[#315f8b] bg-white p-6 shadow-xl" onKeyDown={(event) => {
+      event.stopPropagation();
+      if (event.key === "Escape") { event.preventDefault(); onClose(); }
+      if (event.key === "Enter" && event.repeat) event.preventDefault();
+      if (event.key !== "Tab") return;
+      const controls = [nameRef.current, downloadRef.current, cancelRef.current];
+      if (event.shiftKey && document.activeElement === controls[0]) { event.preventDefault(); cancelRef.current?.focus(); }
+      else if (!event.shiftKey && document.activeElement === controls[2]) { event.preventDefault(); nameRef.current?.focus(); }
+    }}>
+      <h2 id="export-name-title" className="text-2xl font-black">Export {extension === ".xlsx" ? "Excel" : "CSV"}</h2>
+      <p id="export-name-description" className="mt-3 text-[#526b82]">Keep the suggested file name or edit it before downloading.</p>
+      <form onSubmit={download} noValidate>
+        <label htmlFor="export-file-name" className="mt-5 block text-sm font-bold">File name</label>
+        <Input ref={nameRef} id="export-file-name" value={name} onChange={(event) => { setName(event.target.value); setError(""); }} aria-invalid={Boolean(error)} aria-describedby={`export-name-help${error ? " export-name-error" : ""}`} className="mt-2 w-full" autoComplete="off" spellCheck={false} />
+        <p id="export-name-help" className="mt-2 text-xs text-[#60768d]">{artifact.count} filtered records. The {extension} extension is kept automatically.</p>
+        {error && <p id="export-name-error" role="alert" className="mt-4 text-sm font-bold text-red-700">{error}</p>}
+        <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
+          <Button ref={downloadRef} type="submit"><Download className="size-4" /> Download</Button>
+          <Button ref={cancelRef} type="button" variant="outline" onClick={onClose}>Cancel</Button>
+        </div>
+      </form>
+    </section>
+  </div>;
+}
+
 export default function Home() {
   const [database, setDatabase] = useState<IDBDatabase | null>(null);
   const [sessions, setSessions] = useState<WeighingSession[]>([]);
@@ -223,6 +282,7 @@ export default function Home() {
   const [scanError, setScanError] = useState("");
   const [scanAlert, setScanAlert] = useState<ScanAlert | null>(null);
   const [newSessionPrompt, setNewSessionPrompt] = useState<NewSessionPrompt | null>(null);
+  const [exportArtifact, setExportArtifact] = useState<PreparedExport | null>(null);
   const [selected, setSelected] = useState<Plot | null>(null);
   const [weightValue, setWeightValue] = useState("");
   const [lotSite, setLotSite] = useState("");
@@ -266,6 +326,8 @@ export default function Home() {
   const newSessionTriggerRef = useRef<HTMLButtonElement | null>(null);
   const newSessionBusyRef = useRef(false);
   const newSessionOpenRef = useRef(false);
+  const exportOpenRef = useRef(false);
+  const exportTriggerRef = useRef<HTMLElement | null>(null);
   const saveTaskRef = useRef<Promise<boolean> | null>(null);
   const draftBaselineRef = useRef("");
   const selectedRef = useRef<Plot | null>(null);
@@ -581,7 +643,7 @@ export default function Home() {
   }
   function handleScan(event: FormEvent) {
     event.preventDefault();
-    if (scanAlertRef.current || newSessionOpenRef.current || saveTaskRef.current) return;
+    if (scanAlertRef.current || newSessionOpenRef.current || exportOpenRef.current || saveTaskRef.current) return;
     if (!session) { toast.error("Import a workbook before weighing plots."); return; }
     const code = normalize(scanValue);
     const currentCode = selected ? normalize(scanMode === "feid" ? selected.feid : selected.uuid) : "";
@@ -639,12 +701,19 @@ export default function Home() {
   }
 
   function exportFiltered(format: "xlsx" | "csv") {
-    if (!session || !window.GdmWeighingUtils) return;
+    if (!session || !window.GdmWeighingUtils || exportOpenRef.current) return;
     try {
-      const result = window.GdmWeighingUtils.exportSession(session, weights, format, filteredPlots, decimalPlaces);
-      toast.success(`${result.count} filtered records exported with weights and lot details in one file.`);
-      if (result.duplicateLotNames.length) toast.info(`Exported with ${result.duplicateLotNames.length} repeated Lot name(s). All UUID records were kept. Examples: ${result.duplicateLotNames.slice(0, 3).join("; ")}`, { duration: 10000 });
+      const artifact = window.GdmWeighingUtils.prepareSessionExport(session, weights, format, filteredPlots, decimalPlaces);
+      exportTriggerRef.current = document.activeElement as HTMLElement;
+      exportOpenRef.current = true;
+      setExportArtifact(artifact);
     } catch (error) { toast.error(error instanceof Error ? error.message : "Could not export results."); }
+  }
+
+  function closeExportDialog() {
+    exportOpenRef.current = false;
+    setExportArtifact(null);
+    window.setTimeout(() => exportTriggerRef.current?.focus(), 0);
   }
 
   async function changeKeepLotContext(keep: boolean) {
@@ -663,7 +732,7 @@ export default function Home() {
   const applyScaleWeight = useCallback((raw: number) => {
     const value = raw / (10 ** exponentRef.current);
     setRawScaleWeight(raw); setScaleWeight(value);
-    if (selectedRef.current && !newSessionOpenRef.current && !scanAlertRef.current && !saveTaskRef.current) { exactPendingWeightRef.current = value; weightEditedRef.current = false; setWeightValue(formatInputNumber(value, decimalPlacesRef.current)); }
+    if (selectedRef.current && !newSessionOpenRef.current && !exportOpenRef.current && !scanAlertRef.current && !saveTaskRef.current) { exactPendingWeightRef.current = value; weightEditedRef.current = false; setWeightValue(formatInputNumber(value, decimalPlacesRef.current)); }
   }, []);
   const consumeSerial = useCallback((chunk: string) => {
     serialBufferRef.current += chunk;
@@ -738,6 +807,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#edf3f8] pb-10 text-[#17365a]">
       <Toaster position="top-center" richColors />
+      {exportArtifact && <ExportNameDialog artifact={exportArtifact} onClose={closeExportDialog} />}
       <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={(event) => void handleImport(event)} className="hidden" />
       {newSessionPrompt && <div className="fixed inset-0 z-[110] grid place-items-center bg-[#102840]/65 p-4">
         <section role="dialog" aria-modal="true" aria-labelledby="new-session-title" aria-describedby="new-session-description" className="w-full max-w-xl rounded-xl border-2 border-[#315f8b] bg-white p-6 shadow-xl">

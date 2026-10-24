@@ -143,6 +143,20 @@
         </div>
       </section>
     </div>
+    <div id="export-name-prompt" class="session-prompt" hidden>
+      <section class="session-prompt__dialog" role="dialog" aria-modal="true" aria-labelledby="export-name-title" aria-describedby="export-name-description">
+        <div class="session-prompt__hero"><h2 id="export-name-title">Export Excel</h2></div>
+        <div class="session-prompt__body">
+          <p id="export-name-description">Keep the suggested file name or edit it before downloading.</p>
+          <form id="export-name-form" novalidate>
+            <label class="export-name-field" for="export-file-name">File name<input id="export-file-name" type="text" autocomplete="off" spellcheck="false" aria-describedby="export-name-help export-name-error" /></label>
+            <small id="export-name-help" class="export-name-help"></small>
+            <div id="export-name-error" class="session-prompt__error" role="alert" hidden></div>
+            <div class="session-prompt__actions"><button id="export-name-download" type="submit">Download</button><button id="export-name-cancel" class="session-prompt__secondary" type="button">Cancel</button></div>
+          </form>
+        </div>
+      </section>
+    </div>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <script src="public/vendor/xlsx.full.min.js" defer></script>
     <script src="public/plot-import.js" defer></script>

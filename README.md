@@ -38,6 +38,8 @@ O aplicativo inicia sem uma base fixa. O operador deve importar a primeira aba d
 
 No Dashboard, `Export filtered Excel/CSV` inclui todas as linhas dos filtros atuais, independentemente da página. A saída começa com `Lot name`, `Lot site`, `Storage`, `Lot location`, `First order`, `Second order` e `Lot weight`. A coluna `Lot weight` é uma cópia da variável da sessão, não uma segunda pesagem. Campos vazios não bloqueiam a exportação; nomes repetidos geram aviso, sem excluir UUIDs.
 
+Antes de baixar, uma janela permite editar o nome do arquivo, preenchido com o nome sugerido da sessão e timestamp. `Download` confirma; `Cancel` ou Escape fecha sem baixar. A extensão Excel/CSV é mantida automaticamente, sem alterar os dados ou o nome da sessão.
+
 Excel conserva os pesos numéricos exatos com formato decimal; CSV usa UTF-8, ponto decimal e arredondamento selecionado. Ambos podem ser reimportados, incluindo metadados de parcelas pendentes. Em uma nova sessão, um arquivo com apenas uma variável seleciona essa variável automaticamente; com ambas, prevalece a seleção do operador. Valores descritivos podem estar vazios, mas FEID e UUID precisam ser preenchidos e únicos.
 
 `Lot site` oferece Passo Fundo e Chacabuco; `Storage` depende do local. Valores legados são identificados como `(existing)` e preservados. O local do ensaio nunca preenche automaticamente os dados operacionais.
