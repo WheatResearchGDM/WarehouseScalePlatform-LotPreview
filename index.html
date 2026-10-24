@@ -97,7 +97,7 @@
             </div>
             <section class="lot-details" aria-labelledby="lot-details-title">
               <h3 id="lot-details-title">Lot details</h3>
-              <div class="lot-fields"><label for="lot-site">Lot site<input id="lot-site" autocomplete="off" placeholder="Lot site" /></label><label for="lot-storage">Storage<input id="lot-storage" autocomplete="off" placeholder="Storage" /></label><label class="lot-location-field" for="lot-location">Lot location<input id="lot-location" autocomplete="off" placeholder="Lot location" /></label><label for="first-order">First order<input id="first-order" autocomplete="off" placeholder="First order" /></label><label for="second-order">Second order<input id="second-order" autocomplete="off" placeholder="Second order" /></label></div>
+              <div class="lot-fields"><label for="lot-site">Lot site<select id="lot-site"><option value="">Select Lot site</option></select></label><label for="lot-storage">Storage<select id="lot-storage" disabled><option value="">Select Storage</option></select></label><label class="lot-location-field" for="lot-location">Lot location<input id="lot-location" autocomplete="off" placeholder="Lot location" /></label><label for="first-order">First order<input id="first-order" autocomplete="off" placeholder="First order" /></label><label for="second-order">Second order<input id="second-order" autocomplete="off" placeholder="Second order" /></label></div>
               <label class="keep-lot-context"><input id="keep-lot-context" type="checkbox" checked /><span>Keep Lot site, Lot location, Storage, First order and Second order for next plot</span></label>
             </section>
           </form>
@@ -118,7 +118,7 @@
         <section class="panel dashboard-panel"><div class="section-heading"><div><p class="eyebrow">Trials</p><h2>Progress by trial</h2></div></div><div id="trial-donuts" class="donut-grid"></div></section>
         <section class="panel dashboard-panel"><div class="section-heading"><div><p class="eyebrow">Locations</p><h2>Progress by location</h2></div></div><div id="location-donuts" class="donut-grid"></div></section>
         <section class="panel dashboard-panel table-panel">
-          <div class="section-heading"><div><p class="eyebrow">Plot records</p><h2>Weighing data</h2></div><div class="table-heading-actions"><strong id="table-count">0 records</strong><button id="dashboard-export-excel" class="outline-button" type="button">⇩ Export filtered Excel</button><button id="dashboard-export-csv" class="outline-button" type="button">⇩ Export filtered CSV</button><button id="dashboard-lots-excel" class="outline-button lot-export-button" type="button">⇩ Export lots Excel</button><button id="dashboard-lots-csv" class="outline-button lot-export-button" type="button">⇩ Export lots CSV</button></div></div>
+          <div class="section-heading"><div><p class="eyebrow">Plot records</p><h2>Weighing data</h2></div><div class="table-heading-actions"><strong id="table-count">0 records</strong><button id="dashboard-export-excel" class="outline-button" type="button">⇩ Export filtered Excel</button><button id="dashboard-export-csv" class="outline-button" type="button">⇩ Export filtered CSV</button></div></div>
           <div class="filters"><input id="table-search" type="search" placeholder="Search FEID, UUID, OBS or names…" /><select id="trial-filter"><option value="">All trials</option></select><select id="location-filter"><option value="">All locations</option></select><select id="status-filter"><option value="">All statuses</option><option value="weighed">Weighed</option><option value="pending">Pending</option></select></div>
           <div class="pagination pagination--top"><span id="page-summary-top">0–0 of 0</span><div><button id="page-prev-top" type="button">← Previous</button><span id="page-number-top">Page 1 of 1</span><button id="page-next-top" type="button">Next →</button></div></div>
           <div class="table-wrap"><table><thead><tr><th><button type="button" data-sort="status">Status</button></th><th><button type="button" data-sort="seasonYear">Season year</button></th><th><button type="button" data-sort="entityName">Entity name</button></th><th><button type="button" data-sort="obsName">(OBS) Name</button></th><th><button type="button" data-sort="feid">FEID</button></th><th><button type="button" data-sort="uuid">UUID</button></th><th><button type="button" data-sort="block">Block</button></th><th><button type="button" data-sort="entryCode">Entry code</button></th><th><button type="button" data-sort="row">Row</button></th><th><button type="button" data-sort="column">Column</button></th><th><button type="button" data-sort="gerName">(GER) Name</button></th><th><button id="weight-table-heading" type="button" data-sort="weight">Plot weight</button></th><th><button type="button" data-sort="weighedAt">Weighed at</button></th></tr></thead><tbody id="plot-table-body"></tbody></table></div>
@@ -133,14 +133,13 @@
         <div class="scan-alert__body"><p id="scan-alert-message"></p><div class="scan-alert__actions"><button id="scan-alert-update" class="scan-alert__secondary" type="button" hidden>Update Plot weight</button><button id="scan-alert-action" type="button"></button></div><small id="scan-alert-hint">Press Enter or click the button to continue</small></div>
       </section>
     </div>
-    <div id="export-prompt" class="export-prompt" hidden>
-      <section class="export-prompt__dialog" role="dialog" aria-modal="true" aria-labelledby="export-prompt-title" aria-describedby="export-prompt-description">
-        <div class="export-prompt__hero"><span aria-hidden="true">⇩</span><h2 id="export-prompt-title">Export filtered data</h2></div>
-        <div class="export-prompt__body">
-          <p id="export-prompt-description"></p>
-          <small>The lot file includes only weighed plots and is validated before either download starts.</small>
-          <div id="export-prompt-error" class="export-prompt__error" role="alert" hidden></div>
-          <div class="export-prompt__actions"><button id="export-data-lots" type="button">⇩ Export data + lots</button><button id="export-data-only" class="export-prompt__secondary" type="button">Export data only</button><button id="export-cancel" class="export-prompt__cancel" type="button">Cancel</button></div>
+    <div id="new-session-prompt" class="session-prompt" hidden>
+      <section class="session-prompt__dialog" role="dialog" aria-modal="true" aria-labelledby="new-session-title" aria-describedby="new-session-description">
+        <div class="session-prompt__hero"><h2 id="new-session-title">Unsaved changes</h2></div>
+        <div class="session-prompt__body">
+          <p id="new-session-description">Save the current weight and lot details before starting a new weighing session?</p>
+          <div id="new-session-error" class="session-prompt__error" role="alert" hidden></div>
+          <div class="session-prompt__actions"><button id="new-session-save" type="button">Save and continue</button><button id="new-session-discard" class="session-prompt__secondary" type="button">Discard changes</button><button id="new-session-cancel" class="session-prompt__cancel" type="button">Cancel</button></div>
         </div>
       </section>
     </div>

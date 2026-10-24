@@ -75,7 +75,7 @@
   async function parseExcelFile(file) {
     if (!global.XLSX) throw new Error("The spreadsheet reader is unavailable. Refresh the page and try again.");
     if (!file) throw new Error("Select an Excel or CSV file.");
-    const workbook = global.XLSX.read(await file.arrayBuffer(), { type: "array", raw: true, cellDates: true });
+    const workbook = global.XLSX.read(await file.arrayBuffer(), { type: "array", raw: true, cellDates: true, ...(/\.csv$/i.test(file.name) ? { codepage: 65001 } : {}) });
     const sheetName = workbook.SheetNames[0];
     if (!sheetName) throw new Error("The workbook does not contain any sheets.");
     const rows = global.XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "", raw: true });
@@ -118,9 +118,9 @@
         gid: cellText(row[indexes.gid]), gerName: cellText(row[indexes.gerName]),
         initialPlot: indexes.initialPlot >= 0 ? optionalNumericCell(row[indexes.initialPlot]) : undefined,
         finalPlot: indexes.finalPlot >= 0 ? optionalNumericCell(row[indexes.finalPlot]) : undefined,
+        lotMetadata: Object.fromEntries(["lotSite", "storage", "lotLocation", "firstOrder", "secondOrder"].map((key) => [key, indexes[key] >= 0 ? cellText(row[indexes[key]]) : ""])),
       };
-      const invalid = !plot.feid || !plot.uuid || !plot.entityName || !plot.obsName
-        || !plot.seasonYear
+      const invalid = !plot.feid || !plot.uuid
         || feids.has(plot.feid.toUpperCase()) || uuids.has(plot.uuid);
       if (invalid) { invalidRows.push(index + 1); continue; }
       feids.add(plot.feid.toUpperCase());

@@ -3,199 +3,139 @@ import fs from "node:fs/promises";
 import vm from "node:vm";
 
 globalThis.window = globalThis;
-const loadBrowserScript = async (path) => vm.runInThisContext(await fs.readFile(path, "utf8"), { filename: path });
-
-await loadBrowserScript("public/weighing-utils.js");
-
-const plots = [
-  { id: "1", feid: "10", uuid: "A", seasonYear: "2026", entityName: "Trial A", trialType: "EYT", site: "Site 1", location: "North", row: "1", column: "1", entryCode: "1", block: "1", obsName: "1001", gid: "G1", gerName: "R1", initialPlot: 1, finalPlot: 100 },
-  { id: "2", feid: "20", uuid: "B", seasonYear: "2026", entityName: "Trial A", trialType: "EYT", site: "Site 1", location: "North", row: "1", column: "2", entryCode: "2", block: "1", obsName: "1002", gid: "G2", gerName: "R2", initialPlot: 1, finalPlot: 100 },
-  { id: "3", feid: "30", uuid: "C", seasonYear: "2026", entityName: "Trial A", trialType: "EYT", site: "Site 2", location: "South", row: "1", column: "3", entryCode: "3", block: "1", obsName: "1003", gid: "G3", gerName: "R3", initialPlot: 1, finalPlot: 100 },
-];
-const weights = [{ uuid: "A", weight: 0, weightVariable: "plotWeight", lotSite: "Operational site", lotLocation: "Dispatch area", storage: "Cold room", firstOrder: "Order A", secondOrder: "Order B", weighedAt: "2026-10-08T12:00:00.000Z" }];
-
-assert.deepEqual(globalThis.GdmWeighingUtils.overallProgress(plots, weights), { total: 3, completed: 1, remaining: 2, percent: 33 });
-assert.deepEqual(globalThis.GdmWeighingUtils.groupProgress(plots, weights, "location").map(({ label, total, completed }) => ({ label, total, completed })), [
-  { label: "North", total: 2, completed: 1 },
-  { label: "South", total: 1, completed: 0 },
-]);
-const metadataMerge = globalThis.GdmWeighingUtils.prepareMerge(
-  plots,
-  [{ uuid: "A", weight: 0, weightVariable: "plotWeight", weighedAt: "2026-10-08T12:00:00.000Z", lotSite: "", lotLocation: "", storage: "", firstOrder: "", secondOrder: "" }],
-  [{ uuid: "A", weight: 0, weightVariable: "plotWeight", weighedAt: "2026-10-08T12:00:00.000Z", lotSite: "Imported site", lotLocation: "Imported destination", storage: "Imported storage", firstOrder: "Imported first", secondOrder: "Imported second" }],
-);
-assert.equal(metadataMerge.ready.length, 1);
-assert.equal(metadataMerge.ready[0].lotSite, "Imported site");
-assert.equal(metadataMerge.ready[0].lotLocation, "Imported destination");
-assert.equal(metadataMerge.ready[0].storage, "Imported storage");
-assert.equal(metadataMerge.ready[0].firstOrder, "Imported first");
-assert.equal(metadataMerge.ready[0].secondOrder, "Imported second");
-
-const capturedSheets = [];
-const downloadedNames = [];
-globalThis.document = {
-  body: { appendChild() {} },
-  createElement() { return { href: "", download: "", click() { downloadedNames.push(this.download); }, remove() {} }; },
-};
-globalThis.URL.createObjectURL = () => "blob:test";
-globalThis.URL.revokeObjectURL = () => {};
-globalThis.XLSX = {
-  utils: {
-    json_to_sheet(rows) { capturedSheets.push(rows); return {}; },
-    encode_cell({ r, c }) { return `${r}:${c}`; },
-    book_new() { return {}; },
-    book_append_sheet() {},
-    sheet_to_csv() { return "header\r\nvalue"; },
-  },
-  write() { return new Uint8Array([1, 2, 3]); },
-};
-const session = { id: "S1", name: "Session", sourceFileName: "source.xlsx", createdAt: "2026-10-08T11:00:00.000Z", weightVariable: "plotWeight", plots };
-assert.equal(globalThis.GdmWeighingUtils.exportSession(session, weights, "xlsx", plots, 2), 3);
-const sessionRows = capturedSheets[0];
-assert.equal(sessionRows[0]["Plot weight"], 0);
-assert.equal("PW" in sessionRows[0], false);
-assert.equal("Seed weight" in sessionRows[0], false);
-assert.equal(sessionRows[0]["Lot location"], "Dispatch area");
-assert.equal("First order" in sessionRows[0], false);
-assert.equal("Second order" in sessionRows[0], false);
-capturedSheets.length = 0;
-assert.equal(globalThis.GdmWeighingUtils.exportLots(session, weights, "xlsx", plots, 2), 1);
-const lotRows = capturedSheets[0];
-assert.equal(lotRows[0]["Lot name"], "2026 | Trial A | 1 | 1001");
-assert.equal(lotRows[0]["Plot weight"], 0);
-assert.equal("Weight" in lotRows[0], false);
-assert.equal("PW" in lotRows[0], false);
-assert.equal(lotRows[0]["First order"], "Order A");
-assert.equal(lotRows[0]["Second order"], "Order B");
-
-downloadedNames.length = 0;
-const bundled = globalThis.GdmWeighingUtils.exportSessionAndLots(session, weights, "xlsx", plots, 2);
-assert.deepEqual(bundled, { sessionCount: 3, lotCount: 1 });
-assert.equal(downloadedNames.length, 2);
-const timestamps = downloadedNames.map((name) => name.match(/\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}/)?.[0]);
-assert.equal(timestamps[0], timestamps[1]);
-downloadedNames.length = 0;
-const bundledCsv = globalThis.GdmWeighingUtils.exportSessionAndLots(session, weights, "csv", plots, 2);
-assert.deepEqual(bundledCsv, { sessionCount: 3, lotCount: 1 });
-assert.equal(downloadedNames.length, 2);
-assert.equal(downloadedNames.every((name) => name.endsWith(".csv")), true);
-
-capturedSheets.length = 0;
-const seedSession = { ...session, id: "S2", weightVariable: "seedWeight" };
-const seedWeights = [{ ...weights[0], weight: 12.5, weightVariable: "seedWeight" }];
-globalThis.GdmWeighingUtils.exportSession(seedSession, seedWeights, "xlsx", plots, 2);
-assert.equal(capturedSheets[0][0]["Seed weight"], 12.5);
-assert.equal("Plot weight" in capturedSheets[0][0], false);
-capturedSheets.length = 0;
-globalThis.GdmWeighingUtils.exportLots(seedSession, seedWeights, "xlsx", plots, 2);
-assert.equal(capturedSheets[0][0]["Seed weight"], 12.5);
-assert.equal("Weight" in capturedSheets[0][0], false);
-
-const duplicatePlots = [plots[0], { ...plots[0], uuid: "D", feid: "40" }];
-const duplicateWeights = [{ ...weights[0] }, { ...weights[0], uuid: "D" }];
-assert.throws(() => globalThis.GdmWeighingUtils.exportLots(session, duplicateWeights, "xlsx", duplicatePlots, 0), /Duplicate Lot name/);
-assert.throws(() => globalThis.GdmWeighingUtils.exportLots(session, weights, "xlsx", [{ ...plots[0], seasonYear: "" }], 0), /requires Season year/);
-downloadedNames.length = 0;
-assert.throws(() => globalThis.GdmWeighingUtils.exportSessionAndLots(session, duplicateWeights, "xlsx", duplicatePlots, 0), /Duplicate Lot name/);
-assert.equal(downloadedNames.length, 0, "combined export must not download either file when lot validation fails");
-
-await loadBrowserScript("public/plot-import.js");
-const requiredHeaders = globalThis.GdmPlotImport.requiredHeaders;
-assert.equal(requiredHeaders.includes("PW"), false);
-assert.equal(requiredHeaders.includes("Plot weight"), false);
-assert.equal(requiredHeaders.includes("Initial plot"), false);
-assert.equal(requiredHeaders.includes("Final plot"), false);
-assert.equal(globalThis.GdmPlotImport.exportHeaders.includes("Initial plot"), true);
-assert.equal(globalThis.GdmPlotImport.exportHeaders.includes("Final plot"), true);
-assert.equal(globalThis.GdmPlotImport.exportHeaders.includes("First order"), true);
-assert.equal(globalThis.GdmPlotImport.exportHeaders.includes("Second order"), true);
-
-const baseValues = {
-  ID: "1", FEID: "10", UUID: "A", "Season year": "2026", "Entity name": "Trial A", "Trial type": "EYT",
-  Site: "Site 1", Location: "North", Row: "1", Column: "1", "Entry code": "1", Block: "1", "(OBS) Name": "1001",
-  GID: "G1", "(GER) Name": "R1", "Initial plot": 1, "Final plot": 100,
-  "Lot site": "Lot Site 1", "Lot location": "Dispatch area", Storage: "Cold room", "First order": "Imported first", "Second order": "Imported second", "Weighed at": "2026-10-08T12:00:00.000Z",
-};
-let importRows = [];
-globalThis.XLSX.read = () => ({ SheetNames: ["Data"], Sheets: { Data: {} } });
-globalThis.XLSX.utils.sheet_to_json = () => importRows;
-const parse = async (extraHeaders = [], overrides = {}) => {
-  const headers = [...requiredHeaders, "Site", "Lot site", "Lot location", "Storage", "First order", "Second order", "Weighed at", ...extraHeaders];
-  const values = { ...baseValues, ...overrides };
-  importRows = [headers, headers.map((header) => values[header] ?? "")];
-  return globalThis.GdmPlotImport.parseExcelFile({ name: "source.xlsx", async arrayBuffer() { return new ArrayBuffer(0); } });
-};
-
-const noWeights = await parse();
-assert.equal(noWeights.importedWeights.length, 0);
-assert.equal(noWeights.plots.length, 1);
-assert.equal(noWeights.plots[0].initialPlot, undefined);
-assert.equal(noWeights.plots[0].finalPlot, undefined);
-
-const blankPlotRange = await parse(["Initial plot", "Final plot"], { "Initial plot": "", "Final plot": "" });
-assert.equal(blankPlotRange.plots.length, 1);
-assert.equal(blankPlotRange.plots[0].initialPlot, undefined);
-assert.equal(blankPlotRange.plots[0].finalPlot, undefined);
-
-const partialPlotRange = await parse(["Initial plot"], { "Initial plot": 42 });
-assert.equal(partialPlotRange.plots.length, 1);
-assert.equal(partialPlotRange.plots[0].initialPlot, 42);
-assert.equal(partialPlotRange.plots[0].finalPlot, undefined);
-
-const reversedPlotRange = await parse(["Initial plot", "Final plot"], { "Initial plot": 100, "Final plot": 1 });
-assert.equal(reversedPlotRange.plots.length, 1);
-assert.equal(reversedPlotRange.plots[0].initialPlot, 100);
-assert.equal(reversedPlotRange.plots[0].finalPlot, 1);
-
-const plotWithoutRange = { ...plots[0] };
-delete plotWithoutRange.initialPlot;
-delete plotWithoutRange.finalPlot;
-const exportedWithoutRange = globalThis.GdmWeighingUtils.exportRows(session, weights, [plotWithoutRange])[0];
-assert.equal(exportedWithoutRange["Initial plot"], "");
-assert.equal(exportedWithoutRange["Final plot"], "");
-
-for (const [header, variable] of [["Plot weight", "plotWeight"], ["PW", "plotWeight"], ["Seed weight", "seedWeight"], ["SEED.W", "seedWeight"]]) {
-  const imported = await parse([header], { [header]: 0 });
-  assert.equal(imported.importedWeights.length, 1, `${header} should import zero`);
-  assert.equal(imported.importedWeights[0].weight, 0);
-  assert.equal(imported.importedWeights[0].weightVariable, variable);
-  assert.equal(imported.importedWeights[0].lotSite, "Lot Site 1");
-  assert.equal(imported.importedWeights[0].firstOrder, "Imported first");
-  assert.equal(imported.importedWeights[0].secondOrder, "Imported second");
+for (const path of ["public/vendor/xlsx.full.min.js", "public/weighing-utils.js", "public/plot-import.js"]) {
+  vm.runInThisContext(await fs.readFile(path, "utf8"), { filename: path });
 }
+const utils = globalThis.GdmWeighingUtils;
+const importer = globalThis.GdmPlotImport;
+const XLSX = globalThis.XLSX;
+const fields = { lotSite: "Legacy site", storage: "Legacy storage", lotLocation: "Dispatch", firstOrder: "001", secondOrder: "Order B" };
+const plots = [
+  { id: "1", feid: "10", uuid: "A", seasonYear: "2026", entityName: "Trial A", trialType: "EYT", site: "Trial site", location: "North", row: "1", column: "1", entryCode: "1", block: "1", obsName: "1001", gid: "G1", gerName: "R1", initialPlot: 1, finalPlot: 100 },
+  { id: "2", feid: "20", uuid: "B", seasonYear: "", entityName: "", trialType: "", location: "South", row: "", column: "", entryCode: "", block: "", obsName: "", gid: "", gerName: "", lotMetadata: fields },
+  { id: "3", feid: "30", uuid: "C", seasonYear: "2026", entityName: "Trial A", trialType: "EYT", location: "South", row: "", column: "", entryCode: "", block: "1", obsName: "1001", gid: "", gerName: "" },
+];
+const session = { id: "S1", name: "Test session", sourceFileName: "source.xlsx", createdAt: "2026-10-08T11:00:00.000Z", weightVariable: "plotWeight", plots };
+const weights = [
+  { uuid: "A", weight: 0, weightVariable: "plotWeight", ...fields, weighedAt: "2026-10-08T12:00:00.000Z" },
+  { uuid: "C", weight: 3689.0007, weightVariable: "plotWeight", ...fields, weighedAt: "2026-10-08T13:00:00.000Z" },
+];
+const asFile = (blob, name) => ({ name, arrayBuffer: () => blob.arrayBuffer() });
+const headers = ["Lot name", "Lot site", "Storage", "Lot location", "First order", "Second order", "Lot weight"];
+const stamp = new Date("2026-10-24T15:32:18.000Z");
+let downloads = 0;
+globalThis.document = { body: { appendChild() {} }, createElement() { return { click() { downloads++; }, remove() {} }; } };
+const originalCreate = URL.createObjectURL;
+URL.createObjectURL = () => "blob:test";
+URL.revokeObjectURL = () => {};
 
-const bothVariables = await parse(["Plot weight", "Seed weight"], { "Plot weight": 10, "Seed weight": 20 });
-assert.deepEqual(bothVariables.weightValueCounts, { plotWeight: 1, seedWeight: 1 });
-assert.equal(bothVariables.importedWeights.length, 2);
-const equalAliases = await parse(["Plot weight", "PW"], { "Plot weight": 10, PW: 10 });
-assert.equal(equalAliases.importedWeights.length, 1);
-assert.equal(equalAliases.weightConflicts.length, 0);
-const oneAliasFilled = await parse(["Plot weight", "PW"], { "Plot weight": "", PW: 11 });
-assert.equal(oneAliasFilled.importedWeights[0].weight, 11);
-const conflictingAliases = await parse(["Plot weight", "PW"], { "Plot weight": 10, PW: 11 });
-assert.equal(conflictingAliases.importedWeights.length, 0);
-assert.equal(conflictingAliases.weightConflicts[0].row, 2);
-assert.equal(conflictingAliases.weightConflicts[0].weightVariable, "plotWeight");
-const invalidWeight = await parse(["Seed weight"], { "Seed weight": "not-a-number" });
-assert.equal(invalidWeight.importedWeights.length, 0);
-assert.equal(invalidWeight.invalidWeightRows[0].weightVariable, "seedWeight");
+for (const variable of ["plotWeight", "seedWeight"]) {
+  const current = { ...session, weightVariable: variable };
+  const label = utils.weightLabel(variable);
+  const records = weights.map((item) => ({ ...item, weightVariable: variable }));
+  for (const precision of [0, 2, 4, 6]) for (const format of ["xlsx", "csv"]) {
+    const artifact = utils.prepareSessionExport(current, records, format, plots, precision, stamp);
+    assert.equal(artifact.count, 3);
+    assert.deepEqual(artifact.duplicateLotNames, ["2026 | Trial A | 1 | 1001"]);
+    assert.match(artifact.fileName, /test-session_2026-10-24_\d{2}-32-18\.(xlsx|csv)$/);
+    const book = XLSX.read(await artifact.blob.arrayBuffer(), { type: "array", raw: true, cellNF: true });
+    const sheet = book.Sheets[book.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: true });
+    assert.deepEqual(rows[0].slice(0, 7), headers);
+    assert.ok(rows[0].includes(label));
+    assert.equal(rows[0].includes(variable === "plotWeight" ? "Seed weight" : "Plot weight"), false);
+    for (const forbidden of ["PW", "SEED.W", "Weight", "Site"]) assert.equal(rows[0].includes(forbidden), false);
+    const weightColumn = rows[0].indexOf(label);
+    const lotColumn = rows[0].indexOf("Lot weight");
+    assert.equal(rows[2][lotColumn], "");
+    assert.equal(rows[2][weightColumn], "");
+    for (const r of [1, 3]) assert.equal(rows[r][weightColumn], rows[r][lotColumn]);
+    if (format === "xlsx") {
+      for (const c of [lotColumn, weightColumn]) {
+        const cell = sheet[XLSX.utils.encode_cell({ r: 3, c })];
+        assert.equal(cell.t, "n"); assert.equal(cell.v, 3689.0007);
+        assert.equal(cell.z, precision ? "0." + "0".repeat(precision) : "0");
+      }
+    } else assert.ok((await artifact.blob.text()).includes(utils.fixedDecimal(3689.0007, precision)));
+    const restored = await importer.parseExcelFile(asFile(artifact.blob, artifact.fileName));
+    assert.equal(restored.plots.length, 3);
+    assert.equal(restored.importedWeights.length, 2);
+    assert.equal(restored.importedWeights[0].weight, 0);
+    assert.equal(restored.importedWeights[1].weight, format === "xlsx" ? 3689.0007 : Number(utils.fixedDecimal(3689.0007, precision)));
+    assert.equal(restored.importedWeights[0].weighedAt, records[0].weighedAt);
+    assert.deepEqual(restored.plots[1].lotMetadata, fields);
+    assert.equal(restored.plots[1].entityName, "");
+    assert.equal(restored.plots[1].seasonYear, "");
+    assert.equal(restored.plots[1].obsName, "");
+    assert.equal(utils.importVariable(restored, "plotWeight", false), variable);
+    assert.equal(utils.importVariable(restored, "plotWeight", true), "plotWeight");
+    const before = downloads;
+    const downloaded = utils.exportSession(current, records, format, plots, precision);
+    assert.equal(downloads - before, 1);
+    assert.equal(downloaded.count, 3);
+  }
+}
+URL.createObjectURL = originalCreate;
+assert.equal(weights[1].weight, 3689.0007, "Formatting must not mutate stored precision");
+assert.equal(utils.lotName(plots[1]), "");
+assert.equal(utils.lotName({ ...plots[0], seasonYear: "", block: "" }), " | Trial A |  | 1001");
+assert.deepEqual(utils.overallProgress(plots, weights), { total: 3, completed: 2, remaining: 1, percent: 67 });
+assert.deepEqual(utils.groupProgress(plots, weights, "location").map(({ label, total, completed }) => ({ label, total, completed })), [
+  { label: "North", total: 1, completed: 1 }, { label: "South", total: 2, completed: 1 },
+]);
+for (const count of [99, 100, 101, 205]) {
+  const many = Array.from({ length: count }, (_, i) => ({ ...plots[0], feid: String(i), uuid: "M" + i }));
+  assert.equal(utils.prepareSessionExport(session, [], "csv", many).count, count);
+}
+assert.deepEqual(utils.lotCatalog["Chacabuco"], ["Cámara fría_1", "Cámara fría_2", "Galpón exterior"]);
+assert.deepEqual(utils.lotCatalog["Passo Fundo"], ["Câmara fria_1", "Câmara fria_2", "Galpão externo"]);
+assert.equal(utils.lotOptions("Chacabuco", "Old storage", true)[0].label, "Old storage (existing)");
+assert.equal(utils.lotOptions("Chacabuco", "", true).length, 3);
+assert.equal(utils.lotOptions("", "", true).length, 0);
+const context = { ...fields, keepForNext: true, hasValue: true };
+assert.deepEqual(utils.selectLotDetails(plots[1], undefined, { ...context, lotSite: "Passo Fundo" }), fields);
+assert.deepEqual(utils.selectLotDetails(plots[0], undefined, context), fields);
+assert.deepEqual(utils.selectLotDetails(plots[0], { ...fields, lotSite: "" }, context), { ...fields, lotSite: "" });
+assert.equal(utils.selectLotDetails(plots[0], undefined, { ...context, keepForNext: false }).lotSite, "");
+const base = { uuid: "A", weight: 1, weightVariable: "plotWeight", weighedAt: "2026-10-08T12:00:00.000Z", ...fields };
+assert.equal(utils.prepareMerge(plots, [base], [{ ...base, weight: 2, weighedAt: "2026-10-08T13:00:00.000Z" }]).ready[0].weight, 2);
+assert.equal(utils.prepareMerge(plots, [base], [{ ...base, weight: 2, weighedAt: "2026-10-08T11:00:00.000Z" }]).keptCurrent, 1);
+assert.equal(utils.prepareMerge(plots, [base], [{ ...base, weight: 2, weighedAt: "" }]).unresolved.length, 1);
+assert.equal(utils.prepareMerge(plots, [{ ...base, firstOrder: "" }], [{ ...base, firstOrder: "fill" }]).ready[0].firstOrder, "fill");
+assert.equal(utils.prepareMerge(plots, [], [{ ...base, uuid: "unknown" }]).ignored, 1);
 
-const missingHeaders = requiredHeaders.filter((header) => header !== "Season year");
-importRows = [missingHeaders, missingHeaders.map((header) => baseValues[header] ?? "")];
-await assert.rejects(() => globalThis.GdmPlotImport.parseExcelFile({ name: "missing.xlsx", async arrayBuffer() { return new ArrayBuffer(0); } }), /Missing headers: Season year/);
-
-const staticHtml = await fs.readFile("index.html", "utf8");
-assert.equal(staticHtml.includes('id="export-excel"'), false);
-assert.equal(staticHtml.includes('id="export-csv"'), false);
-assert.equal(staticHtml.includes('id="export-prompt"'), true);
-const lotFields = staticHtml.match(/<div class="lot-fields">([\s\S]*?)<\/div>/)?.[1] || "";
-assert.ok(lotFields.indexOf("Lot site") < lotFields.indexOf("Storage"));
-assert.ok(lotFields.indexOf("Storage") < lotFields.indexOf("Lot location"));
-assert.ok(lotFields.indexOf("Lot location") < lotFields.indexOf("First order"));
-assert.ok(lotFields.indexOf("First order") < lotFields.indexOf("Second order"));
-assert.ok(staticHtml.indexOf('class="weight-form"') < staticHtml.indexOf("Lot details"));
-assert.equal(staticHtml.includes("Identifiers"), false);
-assert.ok(staticHtml.indexOf('class="hero-details"') < staticHtml.indexOf('id="weight-form"'));
-assert.ok(staticHtml.includes("Keep Lot site, Lot location, Storage, First order and Second order for next plot"));
-
-console.log("Weight variable and lot feature validation passed.");
+const sourceRow = utils.exportRows(session, weights)[0];
+async function parseRows(rows, extra = []) {
+  const sheet = XLSX.utils.json_to_sheet(rows, { header: [...importer.requiredHeaders, ...extra] });
+  const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, "Data");
+  return importer.parseExcelFile({ name: "input.xlsx", arrayBuffer: async () => XLSX.write(book, { type: "array", bookType: "xlsx" }) });
+}
+for (const [header, variable] of [["Plot weight", "plotWeight"], ["PW", "plotWeight"], ["Seed weight", "seedWeight"], ["SEED.W", "seedWeight"]]) {
+  const row = { ...sourceRow }; delete row["Plot weight"]; row[header] = 0;
+  const result = await parseRows([row]);
+  assert.equal(result.importedWeights[0].weight, 0);
+  assert.equal(result.importedWeights[0].weightVariable, variable);
+}
+let result = await parseRows([{ ...sourceRow, PW: 9 }]);
+assert.equal(result.weightConflicts.length, 1); assert.equal(result.importedWeights.length, 0);
+result = await parseRows([{ ...sourceRow, PW: 0 }]); assert.equal(result.importedWeights.length, 1);
+result = await parseRows([{ ...sourceRow, "Plot weight": "", PW: 10 }]); assert.equal(result.importedWeights[0].weight, 10);
+result = await parseRows([{ ...sourceRow, "Plot weight": "", "Lot weight": 999 }]); assert.equal(result.importedWeights.length, 0);
+result = await parseRows([{ ...sourceRow, "Plot weight": "", "Seed weight": 20 }]);
+assert.equal(utils.importVariable(result, "plotWeight", false), "plotWeight", "Both columns retain operator selection");
+result = await parseRows([{ ...sourceRow, "Plot weight": "invalid" }]); assert.equal(result.invalidWeightRows.length, 1);
+result = await parseRows([sourceRow, { ...sourceRow, UUID: "new" }, { ...sourceRow, UUID: "new2", FEID: "" }]);
+assert.equal(result.plots.length, 1); assert.equal(result.invalidRows.length, 2);
+result = await parseRows([{ ...sourceRow, "Initial plot": 100, "Final plot": 1 }]);
+assert.equal(result.plots[0].finalPlot, 1);
+for (const key of ["PW", "Plot weight", "Initial plot", "Final plot"]) assert.equal(importer.requiredHeaders.includes(key), false);
+const html = await fs.readFile("index.html", "utf8");
+assert.equal(html.includes('id="export-prompt"'), false);
+assert.equal(html.includes("Export lots"), false);
+assert.ok(html.includes('id="new-session-prompt"'));
+assert.ok(html.includes('<select id="lot-site">'));
+assert.ok(html.includes('<select id="lot-storage" disabled>'));
+assert.ok(html.indexOf('class="hero-details"') < html.indexOf('id="weight-form"'));
+const utf8 = await importer.parseExcelFile(asFile(new Blob([await fs.readFile("test-fixtures/unified-seed-results.csv")]), "utf8.csv"));
+assert.equal(utf8.importedWeights[0].storage, "Câmara fria_1", "UTF-8 CSV without BOM preserves accents");
+console.log("PASS: real XLSX/CSV round trips, precision, metadata, variables, filtering, catalogue and merge rules.");

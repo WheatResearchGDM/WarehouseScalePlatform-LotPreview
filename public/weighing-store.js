@@ -3,6 +3,7 @@
   const DB_NAME = "gdm-warehouse-scale";
   const DB_VERSION = 1;
   const ACTIVE_SESSION_KEY = "active-session-id";
+  const WAITING_IMPORT_KEY = "waiting-for-import";
   const LOT_SITE_MIGRATION_KEY = "lot-site-v1-migrated";
   const WEIGHT_VARIABLE_MIGRATION_KEY = "weight-variable-v1-migrated";
   const LEGACY_PLOTS_KEY = "gdm-warehouse-scale-plots-v1";
@@ -21,10 +22,10 @@
       transaction.onabort = () => reject(transaction.error || new Error("Browser storage transaction was cancelled."));
     });
   }
-  function openDatabase() {
+  function openDatabase(name = DB_NAME) {
     return new Promise((resolve, reject) => {
       if (!("indexedDB" in global)) { reject(new Error("This browser does not support persistent session storage.")); return; }
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
+      const request = indexedDB.open(name, DB_VERSION);
       request.onupgradeneeded = () => {
         const database = request.result;
         if (!database.objectStoreNames.contains("sessions")) database.createObjectStore("sessions", { keyPath: "id" });
@@ -88,6 +89,7 @@
       });
     }
     tx.objectStore("settings").put({ key: ACTIVE_SESSION_KEY, value: session.id });
+    tx.objectStore("settings").put({ key: WAITING_IMPORT_KEY, value: false });
     await transactionDone(tx);
     return session;
   }
@@ -127,8 +129,7 @@
     await transactionDone(tx);
     return record;
   }
-  async function saveWeights(database, sessionId, entries) {
-    if (!entries.length) return [];
+  async function saveWeights(database, sessionId, entries, importedPlots = []) {
     const session = await getSession(database, sessionId);
     if (!session) throw new Error("The active weighing session no longer exists.");
     const plotMap = new Map(session.plots.map((plot) => [normalize(plot.uuid), plot]));
@@ -136,6 +137,19 @@
     const records = [];
     const tx = database.transaction(["weights", "sessions"], "readwrite");
     const store = tx.objectStore("weights");
+    // Pending metadata belongs to the plot; it must not create a weight record.
+    const fields = ["lotSite", "storage", "lotLocation", "firstOrder", "secondOrder"];
+    for (const incoming of importedPlots) {
+      const plot = plotMap.get(normalize(incoming.uuid));
+      if (!plot || !incoming.lotMetadata) continue;
+      plot.lotMetadata = Object.fromEntries(fields.map((key) => [key, plot.lotMetadata?.[key] || incoming.lotMetadata[key] || ""]));
+      const existing = await requestResult(store.get(`${sessionId}::${normalize(plot.uuid)}`));
+      if (existing) {
+        // A metadata-only import may fill blanks, never override saved operational data.
+        for (const key of fields) existing[key] = existing[key] || incoming.lotMetadata[key] || "";
+        store.put(existing);
+      }
+    }
     for (const entry of entries) {
       const plot = plotMap.get(normalize(entry.uuid));
       const weightVariable = normalizeWeightVariable(session.weightVariable);
@@ -253,14 +267,15 @@
     tx.objectStore("settings").put({ key: WEIGHT_VARIABLE_MIGRATION_KEY, value: true });
     await transactionDone(tx);
   }
-  async function init() {
-    const database = await openDatabase();
+  async function init({ databaseName = DB_NAME } = {}) {
+    const database = await openDatabase(databaseName);
     await migrateLegacy(database);
     await migrateLotSite(database);
     await migrateWeightVariables(database);
     const sessions = await listSessions(database);
     let activeSessionId = await getSetting(database, ACTIVE_SESSION_KEY);
-    if (!sessions.some((session) => session.id === activeSessionId)) {
+    if (await getSetting(database, WAITING_IMPORT_KEY)) activeSessionId = null;
+    else if (!sessions.some((session) => session.id === activeSessionId)) {
       activeSessionId = sessions[0]?.id || null;
       await setSetting(database, ACTIVE_SESSION_KEY, activeSessionId);
     }
@@ -283,7 +298,18 @@
         firstOrder: String(context?.firstOrder || ""), secondOrder: String(context?.secondOrder || ""),
       });
     },
-    setActiveSession(database, id) { return setSetting(database, ACTIVE_SESSION_KEY, id); },
+    async setActiveSession(database, id) {
+      const tx = database.transaction("settings", "readwrite");
+      tx.objectStore("settings").put({ key: ACTIVE_SESSION_KEY, value: id });
+      tx.objectStore("settings").put({ key: WAITING_IMPORT_KEY, value: !id });
+      await transactionDone(tx);
+    },
+    async beginNewSession(database) {
+      const tx = database.transaction("settings", "readwrite");
+      tx.objectStore("settings").put({ key: ACTIVE_SESSION_KEY, value: null });
+      tx.objectStore("settings").put({ key: WAITING_IMPORT_KEY, value: true });
+      await transactionDone(tx);
+    },
     sessionName: localName, normalize,
   };
 })(window);

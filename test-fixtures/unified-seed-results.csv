@@ -1,0 +1,4 @@
+Lot name,Lot site,Storage,Lot location,First order,Second order,Lot weight,ID,FEID,UUID,Season year,Entity name,Trial type,Location,Row,Column,Entry code,Block,(OBS) Name,GID,(GER) Name,Initial plot,Final plot,Seed weight,Weighing status,Weighed at
+2026 | Trial A | 1 | 101,Passo Fundo,Câmara fria_1,Destination A,001,Blue,0,1,QA101,QA-A,2026,Trial A,EYT,North,1,1,1,1,101,G1,Variety A,,,0,Weighed,2026-10-24T12:00:00.000Z
+,Legacy site,Old room,Destination B,002,Red,,2,QA102,QA-B,,,EYT,South,1,2,2,,,,,,,,Pending,
+2026 | Trial A | 1 | 101,,,,,,,3,QA103,QA-C,2026,Trial A,EYT,North,2,1,3,1,101,G3,Variety B,,,,Pending,

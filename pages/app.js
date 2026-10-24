@@ -11,7 +11,7 @@
     exactPendingWeight: null, weightEdited: false,
     lotSite: "", lotLocation: "", lotStorage: "", firstOrder: "", secondOrder: "", carriedLotSite: "", carriedLotLocation: "", carriedStorage: "", carriedFirstOrder: "", carriedSecondOrder: "", keepLotContext: true, hasLotContext: false,
     scanAlert: null, scanAlertOpenedAt: 0,
-    exportPromptFormat: null, exportBusy: false, exportTrigger: null,
+    newSessionOpen: false, newSessionBusy: false, saveTask: null, draftBaseline: "", importing: false,
     selectedTrials: new Set(), sortKey: "", sortDirection: "asc", filteredPlots: [],
   };
   const byFeid = new Map();
@@ -28,12 +28,12 @@
     plotCard: $("plot-card"), weightForm: $("weight-form"), weight: $("plot-weight"), weightFieldLabel: $("weight-field-label"), lotSite: $("lot-site"), lotLocation: $("lot-location"), lotStorage: $("lot-storage"), firstOrder: $("first-order"), secondOrder: $("second-order"), keepLotContext: $("keep-lot-context"), saveButton: $("save-button"), existingBadge: $("existing-badge"),
     recentList: $("recent-list"), recentEmpty: $("recent-empty"), toast: $("toast"),
     scanAlert: $("scan-alert"), scanAlertTitle: $("scan-alert-title"), scanAlertMessage: $("scan-alert-message"), scanAlertAction: $("scan-alert-action"), scanAlertUpdate: $("scan-alert-update"), scanAlertHint: $("scan-alert-hint"),
-    exportPrompt: $("export-prompt"), exportPromptTitle: $("export-prompt-title"), exportPromptDescription: $("export-prompt-description"), exportPromptError: $("export-prompt-error"), exportDataLots: $("export-data-lots"), exportDataOnly: $("export-data-only"), exportCancel: $("export-cancel"),
+    newPrompt: $("new-session-prompt"), newError: $("new-session-error"), newSave: $("new-session-save"), newDiscard: $("new-session-discard"), newCancel: $("new-session-cancel"),
     connectScale: $("connect-scale"), baudRate: $("baud-rate"), scaleFactor: $("scale-factor"), decimalPlaces: $("decimal-places"), scaleStatus: $("scale-status"), scaleWeight: $("scale-weight"), scaleReadingNote: $("scale-reading-note"), serialHelp: $("serial-help"),
     tableSearch: $("table-search"), trialFilter: $("trial-filter"), locationFilter: $("location-filter"), statusFilter: $("status-filter"), tableBody: $("plot-table-body"),
     pagePrev: $("page-prev"), pageNext: $("page-next"), pageNumber: $("page-number"), pageSummary: $("page-summary"), tableCount: $("table-count"),
     pagePrevTop: $("page-prev-top"), pageNextTop: $("page-next-top"), pageNumberTop: $("page-number-top"), pageSummaryTop: $("page-summary-top"),
-    dashboardExportExcel: $("dashboard-export-excel"), dashboardExportCsv: $("dashboard-export-csv"), dashboardLotsExcel: $("dashboard-lots-excel"), dashboardLotsCsv: $("dashboard-lots-csv"), weightTableHeading: $("weight-table-heading"),
+    dashboardExportExcel: $("dashboard-export-excel"), dashboardExportCsv: $("dashboard-export-csv"), weightTableHeading: $("weight-table-heading"),
   };
 
   function loadScaleExponent() {
@@ -126,9 +126,8 @@
 
   async function refreshSessionList() {
     state.sessions = await window.GdmWeighingStore.listSessions(state.database);
-    refs.sessionSelect.innerHTML = state.sessions.length
-      ? state.sessions.map((session) => `<option value="${escapeHtml(session.id)}">${escapeHtml(session.name)}</option>`).join("")
-      : '<option value="">No active session</option>';
+    refs.sessionSelect.innerHTML = (state.session ? "" : '<option value="">No active session</option>') +
+      state.sessions.map((session) => `<option value="${escapeHtml(session.id)}">${escapeHtml(session.name)}</option>`).join("");
     refs.sessionSelect.value = state.session?.id || "";
     refs.renameSession.disabled = !state.session;
     refs.deleteSession.disabled = !state.session;
@@ -151,7 +150,9 @@
     state.exactPendingWeight = null;
     state.weightEdited = false;
     state.page = 1;
-    state.sortKey = "";
+    state.sortKey = ""; state.sortDirection = "asc"; state.draftBaseline = "";
+    [refs.tableSearch, refs.trialFilter, refs.locationFilter, refs.statusFilter].forEach((control) => { control.value = ""; });
+    refs.scanError.hidden = true;
     state.selectedTrials = new Set(trialNames());
     byFeid.clear(); byUuid.clear();
     for (const plot of state.plots) { byFeid.set(normalize(plot.feid), plot); byUuid.set(normalize(plot.uuid), plot); }
@@ -159,6 +160,7 @@
     refs.scanValue.value = "";
     refs.weight.value = "";
     refs.lotSite.value = ""; refs.lotLocation.value = ""; refs.lotStorage.value = ""; refs.firstOrder.value = ""; refs.secondOrder.value = ""; refs.keepLotContext.checked = state.keepLotContext;
+    renderLotOptions("", "");
     refs.weightVariable.value = state.weightVariable; refs.weightVariable.disabled = state.weights.length > 0;
     refs.weight.placeholder = formatInputNumber(0);
     await refreshSessionList();
@@ -231,8 +233,8 @@
     const locations = window.GdmWeighingUtils.groupProgress(visiblePlots, state.weights, "location");
     $("trial-donuts").innerHTML = donutCards(trials);
     $("location-donuts").innerHTML = donutCards(locations);
-    fillFilter(refs.trialFilter, [...new Set(visiblePlots.map((plot) => plot.entityName).filter(Boolean))].sort(), "All trials");
-    fillFilter(refs.locationFilter, [...new Set(visiblePlots.map((plot) => plot.location).filter(Boolean))].sort(), "All locations");
+    fillFilter(refs.trialFilter, [...new Set(visiblePlots.map((plot) => plot.entityName || "Unnamed trial"))].sort(), "All trials");
+    fillFilter(refs.locationFilter, [...new Set(visiblePlots.map((plot) => plot.location || "Unspecified"))].sort(), "All locations");
     renderTable();
   }
 
@@ -245,7 +247,7 @@
     const filtered = activePlots().filter((plot) => {
       const weighed = records.has(normalize(plot.uuid));
       const haystack = normalize([plot.feid, plot.uuid, plot.seasonYear, plot.obsName, plot.entityName, plot.gerName, plot.location].join(" "));
-      return (!search || haystack.includes(search)) && (!trial || plot.entityName === trial) && (!location || plot.location === location)
+      return (!search || haystack.includes(search)) && (!trial || (plot.entityName || "Unnamed trial") === trial) && (!location || (plot.location || "Unspecified") === location)
         && (!status || (status === "weighed" ? weighed : !weighed));
     });
     if (state.sortKey) {
@@ -279,9 +281,6 @@
     refs.pageNextTop.disabled = refs.pageNext.disabled;
     refs.dashboardExportExcel.disabled = !state.session || !filtered.length;
     refs.dashboardExportCsv.disabled = !state.session || !filtered.length;
-    const hasWeighed = filtered.some((plot) => records.has(normalize(plot.uuid)));
-    refs.dashboardLotsExcel.disabled = !state.session || !hasWeighed;
-    refs.dashboardLotsCsv.disabled = !state.session || !hasWeighed;
     document.querySelectorAll("[data-sort]").forEach((button) => {
       if (button.dataset.sort === state.sortKey) button.dataset.direction = state.sortDirection;
       else delete button.dataset.direction;
@@ -298,18 +297,14 @@
     state.exactPendingWeight = existing ? Number(existing.weight) : null;
     state.weightEdited = false;
     refs.weight.value = existing ? formatInputNumber(Number(existing.weight)) : "";
-    if (existing) {
-      refs.lotSite.value = String(existing.lotSite || "");
-      refs.lotLocation.value = String(existing.lotLocation || "");
-      refs.lotStorage.value = existing.storage || "";
-      refs.firstOrder.value = existing.firstOrder || "";
-      refs.secondOrder.value = existing.secondOrder || "";
-    } else if (state.keepLotContext && state.hasLotContext) {
-      refs.lotSite.value = state.carriedLotSite; refs.lotLocation.value = state.carriedLotLocation; refs.lotStorage.value = state.carriedStorage;
-      refs.firstOrder.value = state.carriedFirstOrder; refs.secondOrder.value = state.carriedSecondOrder;
-    } else {
-      refs.lotSite.value = ""; refs.lotLocation.value = ""; refs.lotStorage.value = ""; refs.firstOrder.value = ""; refs.secondOrder.value = "";
-    }
+    const details = window.GdmWeighingUtils.selectLotDetails(plot, existing, {
+      keepForNext: state.keepLotContext, hasValue: state.hasLotContext,
+      lotSite: state.carriedLotSite, storage: state.carriedStorage, lotLocation: state.carriedLotLocation,
+      firstOrder: state.carriedFirstOrder, secondOrder: state.carriedSecondOrder,
+    });
+    renderLotOptions(details.lotSite, details.storage);
+    refs.lotLocation.value = details.lotLocation; refs.firstOrder.value = details.firstOrder; refs.secondOrder.value = details.secondOrder;
+    state.draftBaseline = draftSnapshot();
     refs.existingBadge.hidden = !existing;
     refs.existingBadge.textContent = existing ? `Already weighed: ${weightLabel()} ${formatNumber(existing.weight)}` : "";
     refs.saveButton.textContent = existing ? `✓ Update ${weightLabel()}` : `✓ Save ${weightLabel()}`;
@@ -333,11 +328,19 @@
     renderRecent();
     renderDashboard();
   }
-  async function saveCurrentWeight() {
-    if (!state.selected || !state.session) return;
+  function saveCurrentWeight() {
+    if (state.saveTask) return state.saveTask;
+    const task = persistCurrentWeight();
+    state.saveTask = task;
+    void task.finally(() => { if (state.saveTask === task) state.saveTask = null; });
+    return task;
+  }
+  async function persistCurrentWeight() {
+    if (!state.selected || !state.session) return false;
     const weight = !state.weightEdited && state.exactPendingWeight !== null ? state.exactPendingWeight : parseWeight(refs.weight.value);
-    if (!Number.isFinite(weight) || weight < 0) { showToast("Enter or wait for a valid non-negative scale weight.", true); refs.weight.focus(); refs.weight.select(); return; }
+    if (!Number.isFinite(weight) || weight < 0) { showToast("Enter or wait for a valid non-negative scale weight.", true); refs.weight.focus(); refs.weight.select(); return false; }
     refs.saveButton.disabled = true;
+    [refs.sessionSelect, refs.importData, refs.renameSession, refs.deleteSession].forEach((control) => { control.disabled = true; });
     try {
       const plot = state.selected;
       const saved = await window.GdmWeighingStore.saveWeight(
@@ -356,15 +359,18 @@
       renderAll();
       showToast(`${weightLabel()} ${formatNumber(weight)} saved for plot ${plot.obsName}.`);
       clearSelection();
-    } catch (error) { showToast(error instanceof Error ? error.message : "Could not save the weight.", true); }
-    finally { refs.saveButton.disabled = false; }
+      return true;
+    } catch (error) { showToast(error instanceof Error ? error.message : "Could not save the weight.", true); return false; }
+    finally { refs.saveButton.disabled = false; [refs.sessionSelect, refs.importData, refs.renameSession, refs.deleteSession].forEach((control) => { control.disabled = false; }); }
   }
 
   async function importFile(file) {
+    if (state.importing || state.saveTask || state.newSessionOpen) return;
+    state.importing = true;
     refs.importData.disabled = true; refs.importData.textContent = "Importing…";
     try {
       const result = await window.GdmPlotImport.parseExcelFile(file);
-      const targetVariable = state.session?.weightVariable || state.weightVariable;
+      const targetVariable = window.GdmWeighingUtils.importVariable(result, state.session?.weightVariable || state.weightVariable, Boolean(state.session));
       const targetLabel = weightLabel(targetVariable);
       const otherVariable = targetVariable === "plotWeight" ? "seedWeight" : "plotWeight";
       const importedWeights = result.importedWeights.filter((item) => item.weightVariable === targetVariable);
@@ -373,12 +379,12 @@
       const targetConflicts = result.weightConflicts.filter((item) => item.weightVariable === targetVariable);
       const relevantConflicts = targetConflicts.length;
       const invalid = result.invalidRows.length + relevantInvalid;
-      if (!importedWeights.length && !relevantInvalid && !relevantConflicts && ignoredOtherWeights > 0) throw new Error(`This file contains ${weightLabel(otherVariable)} values but the current session uses ${targetLabel}. Select the matching variable in an empty session or use Start New Weighing.`);
+      if (state.session && !result.weightColumns[targetVariable] && !importedWeights.length && !relevantInvalid && !relevantConflicts && ignoredOtherWeights > 0) throw new Error(`This file contains ${weightLabel(otherVariable)} values but the current session uses ${targetLabel}. Select the matching variable in an empty session or use Start New Weighing.`);
       const importNotes = [
         ignoredOtherWeights ? `${ignoredOtherWeights} ${weightLabel(otherVariable)} value(s) ignored` : "",
         relevantConflicts ? `${relevantConflicts} conflicting ${targetLabel} row(s) skipped (${targetConflicts.slice(0, 5).map((item) => item.row).join(", ")}${relevantConflicts > 5 ? ", …" : ""})` : "",
       ].filter(Boolean);
-      if (!state.session || !importedWeights.length) {
+      if (!state.session) {
         const session = await window.GdmWeighingStore.createSession(state.database, result.plots, result.fileName, undefined, targetVariable, importedWeights);
         await setActiveSession(session.id);
         showToast(`Session created for ${targetLabel} with ${result.plots.length} plots and ${importedWeights.length} existing weight${importedWeights.length === 1 ? "" : "s"}${invalid ? `; ${invalid} invalid row(s) skipped` : ""}${importNotes.length ? `; ${importNotes.join("; ")}` : ""}.`);
@@ -390,75 +396,78 @@
         includeUnresolved = window.confirm(`${merge.unresolved.length} conflicting weight(s) do not have comparable timestamps. Select OK to use the imported values, or Cancel to keep the current session values.`);
       }
       const entries = [...merge.ready, ...(includeUnresolved ? merge.unresolved : [])];
-      await window.GdmWeighingStore.saveWeights(state.database, state.session.id, entries);
-      state.weights = await window.GdmWeighingStore.getWeights(state.database, state.session.id);
-      state.session = await window.GdmWeighingStore.getSession(state.database, state.session.id);
-      renderAll();
+      await window.GdmWeighingStore.saveWeights(state.database, state.session.id, entries, result.plots);
+      await loadSession(state.session.id);
       const kept = merge.keptCurrent + (includeUnresolved ? 0 : merge.unresolved.length);
       showToast(`Partial ${targetLabel} results: ${entries.length} imported, ${kept} current kept, ${merge.unchanged} unchanged, ${merge.ignored} unmatched, ${invalid} invalid${importNotes.length ? `; ${importNotes.join("; ")}` : ""}.`);
     } catch (error) { showToast(error instanceof Error ? error.message : "Could not import the file.", true); }
-    finally { refs.importData.disabled = false; refs.importData.textContent = "⇧ Import Excel / CSV"; refs.dataFile.value = ""; }
+    finally { state.importing = false; refs.importData.disabled = false; refs.importData.textContent = "⇧ Import Excel / CSV"; refs.dataFile.value = ""; }
   }
 
-  function setExportBusy(busy) {
-    state.exportBusy = busy;
-    refs.exportDataLots.disabled = busy;
-    refs.exportDataOnly.disabled = busy;
-    refs.exportCancel.disabled = busy;
-    refs.exportDataLots.textContent = busy ? "Preparing files…" : "⇩ Export data + lots";
+  function renderLotOptions(site, storage) {
+    const option = (item) => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`;
+    refs.lotSite.innerHTML = '<option value="">Select Lot site</option>' + window.GdmWeighingUtils.lotOptions("", site).map(option).join("");
+    refs.lotSite.value = site;
+    refs.lotStorage.innerHTML = '<option value="">Select Storage</option>' + window.GdmWeighingUtils.lotOptions(site, storage, true).map(option).join("");
+    refs.lotStorage.value = storage;
+    refs.lotStorage.disabled = !site;
   }
-
-  function openExportPrompt(format, trigger) {
-    if (!state.session || !state.filteredPlots.length) { showToast("No plot records match the current filters.", true); return; }
-    state.exportPromptFormat = format;
-    state.exportTrigger = trigger;
-    refs.exportPromptTitle.textContent = `Export filtered ${format === "xlsx" ? "Excel" : "CSV"}`;
-    refs.exportPromptDescription.textContent = `Export ${state.filteredPlots.length} filtered plot record${state.filteredPlots.length === 1 ? "" : "s"}. Would you also like to export the matching lot file?`;
-    refs.exportPromptError.hidden = true;
-    refs.exportPromptError.textContent = "";
-    setExportBusy(false);
-    refs.exportPrompt.hidden = false;
-    setTimeout(() => refs.exportDataLots.focus(), 0);
+  function draftSnapshot() {
+    return JSON.stringify({
+      weight: !state.weightEdited && state.exactPendingWeight !== null ? String(state.exactPendingWeight) : refs.weight.value.trim(),
+      lotSite: refs.lotSite.value, storage: refs.lotStorage.value, lotLocation: refs.lotLocation.value,
+      firstOrder: refs.firstOrder.value, secondOrder: refs.secondOrder.value,
+    });
   }
-
-  function closeExportPrompt() {
-    const trigger = state.exportTrigger;
-    state.exportPromptFormat = null;
-    state.exportTrigger = null;
-    setExportBusy(false);
-    refs.exportPrompt.hidden = true;
-    setTimeout(() => trigger?.focus(), 0);
+  function closeNewPrompt() {
+    if (state.newSessionBusy) return;
+    state.newSessionOpen = false; refs.newPrompt.hidden = true;
+    refs.newSession.focus();
   }
-
-  function exportPromptChoice(includeLots) {
-    if (!state.exportPromptFormat || state.exportBusy || !state.session) return;
-    const format = state.exportPromptFormat;
-    setExportBusy(true);
-    refs.exportPromptError.hidden = true;
+  function setNewBusy(busy) {
+    state.newSessionBusy = busy;
+    [refs.newSave, refs.newDiscard, refs.newCancel].forEach((button) => { button.disabled = busy; });
+  }
+  async function openBlankSession() {
+    if (state.newSessionBusy || !state.database) return;
+    setNewBusy(true);
     try {
-      if (includeLots) {
-        const result = window.GdmWeighingUtils.exportSessionAndLots(state.session, state.weights, format, state.filteredPlots, state.decimalPlaces);
-        closeExportPrompt();
-        showToast(`${result.sessionCount} filtered plot records and ${result.lotCount} lot record${result.lotCount === 1 ? "" : "s"} exported to ${format === "xlsx" ? "Excel" : "CSV"}.`);
-      } else {
-        const count = window.GdmWeighingUtils.exportSession(state.session, state.weights, format, state.filteredPlots, state.decimalPlaces);
-        closeExportPrompt();
-        showToast(`${count} filtered plot records exported to ${format === "xlsx" ? "Excel" : "CSV"} with ${state.decimalPlaces} decimal place${state.decimalPlaces === 1 ? "" : "s"}.`);
-      }
-    } catch (error) {
-      setExportBusy(false);
-      refs.exportPromptError.textContent = error instanceof Error ? error.message : "Could not prepare the export files.";
-      refs.exportPromptError.hidden = false;
-      refs.exportDataLots.focus();
+      await window.GdmWeighingStore.beginNewSession(state.database);
+      await loadSession(null);
+      document.querySelector('[data-tab="weighing"]').click();
+      setNewBusy(false); closeNewPrompt();
+      refs.dataFile.value = ""; refs.dataFile.click();
+      showToast("Previous session preserved. Import a workbook to start a new session.");
+    } catch (error) { showToast(error instanceof Error ? error.message : "Could not start a new session.", true); }
+    finally { setNewBusy(false); }
+  }
+  async function startNewSession() {
+    if (state.newSessionBusy || state.newSessionOpen || state.importing) return;
+    if (state.saveTask) { if (await state.saveTask) await openBlankSession(); return; }
+    if (state.selected && draftSnapshot() !== state.draftBaseline) {
+      state.newSessionOpen = true; refs.newPrompt.hidden = false; refs.newError.hidden = true;
+      refs.newCancel.focus();
+      return;
+    }
+    await openBlankSession();
+  }
+  async function saveAndContinue() {
+    if (state.newSessionBusy) return;
+    setNewBusy(true); refs.newError.hidden = true;
+    const saved = await saveCurrentWeight();
+    setNewBusy(false);
+    if (saved) await openBlankSession();
+    else {
+      refs.newError.textContent = "Not saved. Cancel to correct the weight, or discard changes to continue.";
+      refs.newError.hidden = false; refs.newCancel.focus();
     }
   }
-
-  function exportLots(format) {
-    if (!state.session) { showToast("Load a weighing session before exporting lots.", true); return; }
+  function exportFiltered(format) {
+    if (!state.session) return;
     try {
-      const count = window.GdmWeighingUtils.exportLots(state.session, state.weights, format, state.filteredPlots, state.decimalPlaces);
-      showToast(`${count} filtered lot record${count === 1 ? "" : "s"} exported to ${format === "xlsx" ? "Excel" : "CSV"}.`);
-    } catch (error) { showToast(error instanceof Error ? error.message : "Could not export lots.", true); }
+      const result = window.GdmWeighingUtils.exportSession(state.session, state.weights, format, state.filteredPlots, state.decimalPlaces);
+      showToast(`${result.count} filtered records exported with weights and lot details in one file.${result.duplicateLotNames.length ? ` Notice: ${result.duplicateLotNames.length} repeated Lot name(s); all UUID records were kept.` : ""}`);
+    } catch (error) { showToast(error instanceof Error ? error.message : "Could not export results.", true); }
   }
 
   function parseScaleWeight(rawLine) {
@@ -474,7 +483,7 @@
     const factor = state.scaleExponent ? ` · ${scaleFactorLabel()}` : "";
     refs.scaleReadingNote.textContent = state.selected ? `${weightLabel()} filled automatically${factor}` : `Scan a plot to apply${factor}`;
     refs.scaleWeight.title = `Raw reading: ${formatRawNumber(rawValue)}${rawLine ? ` (${String(rawLine).trim()})` : ""}`;
-    if (state.selected) { state.exactPendingWeight = value; state.weightEdited = false; refs.weight.value = formatInputNumber(value); }
+    if (state.selected && !state.newSessionOpen && !state.scanAlert && !state.saveTask) { state.exactPendingWeight = value; state.weightEdited = false; refs.weight.value = formatInputNumber(value); }
   }
   function consumeSerialText(chunk) {
     state.serialBuffer += chunk;
@@ -520,7 +529,7 @@
 
   refs.scanForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    if (state.scanAlert) return;
+    if (state.scanAlert || state.newSessionOpen || state.saveTask) return;
     if (!state.session) { showToast("Import a workbook before weighing plots.", true); return; }
     const scannedValue = refs.scanValue.value.trim();
     const code = normalize(refs.scanValue.value);
@@ -551,17 +560,19 @@
   });
   refs.scanAlertAction.addEventListener("click", () => { if (state.scanAlert === "existing") keepExistingWeight(); else closeScanAlert(); });
   refs.scanAlertUpdate.addEventListener("click", updateExistingWeight);
-  refs.exportDataLots.addEventListener("click", () => exportPromptChoice(true));
-  refs.exportDataOnly.addEventListener("click", () => exportPromptChoice(false));
-  refs.exportCancel.addEventListener("click", closeExportPrompt);
+  refs.newSave.addEventListener("click", () => void saveAndContinue());
+  refs.newDiscard.addEventListener("click", () => void openBlankSession());
+  refs.newCancel.addEventListener("click", closeNewPrompt);
+  refs.lotSite.addEventListener("change", () => renderLotOptions(refs.lotSite.value, ""));
   document.addEventListener("keydown", (event) => {
-    if (!state.exportPromptFormat) return;
-    if (event.key === "Escape" && !state.exportBusy) { event.preventDefault(); event.stopPropagation(); closeExportPrompt(); return; }
+    if (!state.newSessionOpen) return;
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeNewPrompt(); return; }
     if (event.key !== "Tab") return;
-    const buttons = [refs.exportDataLots, refs.exportDataOnly, refs.exportCancel].filter((button) => !button.disabled);
-    if (!buttons.length) return;
+    const buttons = [refs.newSave, refs.newDiscard, refs.newCancel].filter((button) => !button.disabled);
+    if (!buttons.length) { event.preventDefault(); return; }
     const first = buttons[0]; const last = buttons[buttons.length - 1];
-    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    if (!buttons.includes(document.activeElement)) { event.preventDefault(); last.focus(); }
+    else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   }, true);
   document.addEventListener("keydown", (event) => {
@@ -585,7 +596,7 @@
       if (state.scanAlert === "existing") keepExistingWeight(); else closeScanAlert();
     }
   }, true);
-  refs.weightForm.addEventListener("submit", (event) => { event.preventDefault(); void saveCurrentWeight(); });
+  refs.weightForm.addEventListener("submit", (event) => { event.preventDefault(); if (!state.newSessionOpen && !state.scanAlert) void saveCurrentWeight(); });
   refs.weight.addEventListener("input", () => { state.weightEdited = true; state.exactPendingWeight = null; });
   refs.keepLotContext.addEventListener("change", async () => {
     state.keepLotContext = refs.keepLotContext.checked;
@@ -611,10 +622,8 @@
   refs.connectScale.addEventListener("click", () => void toggleScaleConnection());
   refs.importData.addEventListener("click", () => refs.dataFile.click());
   refs.dataFile.addEventListener("change", () => { const [file] = refs.dataFile.files || []; if (file) void importFile(file); });
-  refs.dashboardExportExcel.addEventListener("click", (event) => openExportPrompt("xlsx", event.currentTarget));
-  refs.dashboardExportCsv.addEventListener("click", (event) => openExportPrompt("csv", event.currentTarget));
-  refs.dashboardLotsExcel.addEventListener("click", () => exportLots("xlsx"));
-  refs.dashboardLotsCsv.addEventListener("click", () => exportLots("csv"));
+  refs.dashboardExportExcel.addEventListener("click", () => exportFiltered("xlsx"));
+  refs.dashboardExportCsv.addEventListener("click", () => exportFiltered("csv"));
   refs.sessionSelect.addEventListener("change", () => void setActiveSession(refs.sessionSelect.value));
   refs.trialSlicerButton.addEventListener("click", () => {
     refs.trialSlicerMenu.hidden = !refs.trialSlicerMenu.hidden;
@@ -632,13 +641,7 @@
   document.addEventListener("click", (event) => {
     if (!event.target.closest(".trial-slicer")) { refs.trialSlicerMenu.hidden = true; refs.trialSlicerButton.setAttribute("aria-expanded", "false"); }
   });
-  refs.newSession.addEventListener("click", async () => {
-    try {
-      if (!state.session) { refs.dataFile.click(); return; }
-      const session = await window.GdmWeighingStore.createSession(state.database, state.plots, state.session.sourceFileName, undefined, "plotWeight");
-      await setActiveSession(session.id); showToast(`New session “${session.name}” started.`);
-    } catch (error) { showToast(error instanceof Error ? error.message : "Could not start a new session.", true); }
-  });
+  refs.newSession.addEventListener("click", () => void startNewSession());
   refs.renameSession.addEventListener("click", async () => {
     if (!state.session) return;
     const name = window.prompt("Enter a new name for this session:", state.session.name);
